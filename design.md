@@ -6,7 +6,7 @@
 
 ## 权限与数据
 
-用户通过 Edge 的目录选择器授权一个工作区。`FileSystemDirectoryHandle` 仅保存于该站点的 IndexedDB；每次启动检查读写授权。文件内容不会发往网络。最近打开项和主题偏好同样仅存在 IndexedDB。
+用户通过 Edge 的目录选择器授权多个工作区。每个 `FileSystemDirectoryHandle` 连同工作区标识和名称保存于该站点的 IndexedDB；每次启动分别检查读写授权。文件内容不会发往网络。移除工作区只删除本地授权记录，不触碰文件。
 
 ## 文件保真
 
