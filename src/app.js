@@ -20,7 +20,7 @@ function updateEditorInfo() {
   const active = state.active; const disabled = !active;
   ['save', 'saveAs', 'encodingSelect'].forEach((id) => { $(id).disabled = disabled; });
   if (!active) return;
-  $('encoding').textContent = active.metadata.encoding; $('bom').textContent = active.metadata.bom ? active.metadata.bom.toUpperCase() : '无';
+  $('encoding').textContent = active.metadata.encoding.toUpperCase(); $('bom').textContent = active.metadata.bom ? active.metadata.bom.toUpperCase() : '无';
   $('newline').textContent = active.newline === 'crlf' ? 'CRLF' : active.newline === 'cr' ? 'CR' : 'LF'; $('encodingSelect').value = active.metadata.encoding;
 }
 
