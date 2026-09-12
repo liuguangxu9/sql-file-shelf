@@ -1,0 +1,10 @@
+{
+  "name": "SQL 文件架",
+  "short_name": "SQL 文件架",
+  "description": "本地 SQL、文本与 Markdown 文件编辑器",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "lang": "zh-CN"
+}
