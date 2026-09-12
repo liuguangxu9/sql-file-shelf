@@ -8507,7 +8507,7 @@ const codec = require('./codec');
 const store = require('./workspace-store');
 const files = require('./file-model');
 const ACCEPTED = new Set(['sql', 'txt', 'md']);
-const state = { workspaces: [], activeWorkspaceId: null, fileCache: new Map(), active: null, dirty: false, globalTimer: null };
+const state = { workspaces: [], activeWorkspaceId: null, fileCache: new Map(), active: null, dirty: false, globalTimer: null, fileSort: { key: 'modified', direction: 'desc' }, draggingWorkspaceId: null };
 const $ = (id) => document.getElementById(id);
 const current = () => state.workspaces.find((item) => item.id === state.activeWorkspaceId) || null;
 const makeId = () => crypto.randomUUID?.() || `ws-${Date.now()}-${Math.random()}`;
@@ -8584,7 +8584,7 @@ async function openFile(workspaceId, entry) {
   try {
     if (state.dirty && !confirm('当前文件尚未保存，仍要打开其他文件吗？')) return;
     const bytes = new Uint8Array(await (await entry.handle.getFile()).arrayBuffer()); const metadata = codec.detectEncoding(bytes); const text = codec.decodeFileBytes(bytes, metadata);
-    state.active = { workspaceId, ...entry, metadata, newline: codec.detectNewline(text) }; $('editor').value = text; $('editor').disabled = false;
+    state.active = { workspaceId, ...entry, metadata, newline: codec.detectNewline(text) }; $('editor').value = text; $('editor').disabled = false; renderEditorDecorations();
     const workspace = state.workspaces.find((item) => item.id === workspaceId); $('fileTitle').textContent = entry.name; $('filePath').textContent = `${workspace.name} / ${entry.path}`; markDirty(false); updateEditorInfo(); await renderFiles();
   } catch (error) { setStatus(`无法打开文件：${error.message}`, true); }
 }
@@ -8593,7 +8593,8 @@ async function renderWorkspaces() {
   const list = $('workspaceList'); list.replaceChildren(); $('workspaceCount').textContent = `${state.workspaces.length} 个`;
   $('workspaceSummary').textContent = state.workspaces.length ? `已记住 ${state.workspaces.length} 个工作区` : '新增一个本地目录作为工作区';
   for (const item of state.workspaces) {
-    const row = document.createElement('div'); row.className = 'workspace'; const pick = document.createElement('button'); pick.textContent = `▣ ${item.name}`; if (item.id === state.activeWorkspaceId) pick.className = 'active'; pick.addEventListener('click', () => selectWorkspace(item.id));
+    const row = document.createElement('div'); row.className = 'workspace'; const pick = document.createElement('button'); pick.textContent = `⋮⋮  ${item.name}`; pick.draggable = true; if (item.id === state.activeWorkspaceId) pick.className = 'active'; pick.addEventListener('click', () => selectWorkspace(item.id)); pick.addEventListener('dragstart', () => { state.draggingWorkspaceId = item.id; });
+    row.addEventListener('dragover', (event) => { event.preventDefault(); if (state.draggingWorkspaceId !== item.id) row.classList.add('drag-over'); }); row.addEventListener('dragleave', () => row.classList.remove('drag-over')); row.addEventListener('drop', async (event) => { event.preventDefault(); row.classList.remove('drag-over'); if (!state.draggingWorkspaceId) return; state.workspaces = store.moveWorkspace(state.workspaces, state.draggingWorkspaceId, item.id); state.draggingWorkspaceId = null; await persist(); await renderWorkspaces(); });
     const remove = document.createElement('button'); remove.className = 'remove'; remove.textContent = '×'; remove.title = '移除工作区'; remove.addEventListener('click', () => removeWorkspace(item.id)); row.append(pick, remove); list.append(row);
     if (!(await permission(item.handle))) { const grant = document.createElement('button'); grant.className = 'grant'; grant.textContent = '恢复此目录访问'; grant.addEventListener('click', () => requestAccess(item.id)); list.append(grant); }
   }
@@ -8601,10 +8602,13 @@ async function renderWorkspaces() {
 }
 
 async function renderFiles() {
-  const body = $('fileList'); body.replaceChildren(); const workspace = current(); const all = workspace ? state.fileCache.get(workspace.id) || [] : []; const visible = files.filterFiles(all, $('fileSearch').value); $('fileCount').textContent = `${visible.length} 个`; $('fileEmpty').hidden = Boolean(visible.length);
+  const body = $('fileList'); body.replaceChildren(); const workspace = current(); const all = workspace ? state.fileCache.get(workspace.id) || [] : []; const visible = files.filterFiles(all, $('fileSearch').value, state.fileSort); $('fileCount').textContent = `${visible.length} 个`; $('fileEmpty').hidden = Boolean(visible.length); updateSortHeaders();
   for (const entry of visible) { const row = document.createElement('tr'); if (state.active?.handle === entry.handle) row.className = 'active'; row.addEventListener('click', () => openFile(workspace.id, entry));
-    const name = document.createElement('td'); name.className = 'name'; name.textContent = entry.path; const time = document.createElement('td'); time.className = 'time'; time.textContent = files.formatFileTime(entry.modified); const type = document.createElement('td'); type.className = 'type'; type.textContent = entry.extension; row.append(name, time, type); body.append(row); }
+    const name = document.createElement('td'); name.className = 'name'; name.textContent = entry.path; name.title = entry.path; const time = document.createElement('td'); time.className = 'time'; time.textContent = files.formatFileTime(entry.modified); const type = document.createElement('td'); type.className = 'type'; type.textContent = entry.extension; row.append(name, time, type); body.append(row); }
 }
+
+function updateSortHeaders() { const labels = { name: '文件名', modified: '修改时间', extension: '格式' }; for (const [key, label] of Object.entries(labels)) { const header = document.querySelector(`.fileTable th.${key === 'modified' ? 'time' : key === 'extension' ? 'type' : 'name'}`); header.textContent = `${label}${state.fileSort.key === key ? state.fileSort.direction === 'asc' ? ' ↑' : ' ↓' : ' ↕'}`; } }
+function sortFiles(key) { state.fileSort = { key, direction: state.fileSort.key === key && state.fileSort.direction === 'asc' ? 'desc' : 'asc' }; renderFiles(); }
 
 async function renderGlobalSearch() {
   const query = $('globalSearch').value.trim(); const target = $('globalResults'); target.replaceChildren(); if (!query) return;
@@ -8632,9 +8636,25 @@ async function save() { try { if (!state.active) return; await writeTo(state.act
 async function saveAs() { if (!state.active) return; const owner = state.workspaces.find((item) => item.id === state.active.workspaceId); const name = prompt('另存为（保存到工作区根目录）：', state.active.name); if (!name) return; if (!ACCEPTED.has(extension(name))) return setStatus('仅支持 .sql、.txt、.md。', true); try { const handle = await owner.handle.getFileHandle(name, { create: true }); await writeTo(handle, owner.handle, false); $('fileTitle').textContent = name; $('filePath').textContent = `${owner.name} / ${name}`; setStatus(`已另存为 ${name}。`); } catch (error) { setStatus(`另存失败：${error.message}`, true); } }
 function changeEncoding() { if (!state.active) return; state.active.metadata = { encoding: $('encodingSelect').value, bom: null, confidence: 1, source: 'manual' }; markDirty(true); updateEditorInfo(); }
 
+function escapeHtml(text) { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function highlightSql(text) {
+  const tokens = /(--[^\r\n]*|\/\*[\s\S]*?\*\/)|('(?:''|[^'])*'|"(?:""|[^"])*")|\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|INSERT|INTO|UPDATE|DELETE|CREATE|ALTER|DROP|TABLE|VIEW|AS|AND|OR|NOT|NULL|IS|IN|LIKE|ORDER|BY|GROUP|HAVING|LIMIT|CASE|WHEN|THEN|ELSE|END|VALUES|SET|DISTINCT|UNION|ALL)\b|\b(\d+(?:\.\d+)?)\b/gi;
+  return text.replace(tokens, (match, comment, string, keyword, number) => `<span class="${comment ? 'sql-comment' : string ? 'sql-string' : keyword ? 'sql-keyword' : 'sql-number'}">${escapeHtml(match)}</span>`);
+}
+function renderEditorDecorations() { const editor = $('editor'); const text = editor.value; $('lineNumbers').textContent = Array.from({ length: Math.max(1, text.split('\n').length) }, (_, index) => index + 1).join('\n'); $('highlightCode').innerHTML = state.active?.extension === 'sql' ? highlightSql(text) : escapeHtml(text); }
+function setupEditorChrome() {
+  const editor = $('editor'); const shell = document.createElement('div'); shell.className = 'editorShell'; const lines = document.createElement('pre'); lines.id = 'lineNumbers'; lines.className = 'lineNumbers'; const highlight = document.createElement('pre'); highlight.id = 'highlight'; highlight.className = 'highlight'; const code = document.createElement('code'); code.id = 'highlightCode'; highlight.append(code); editor.parentElement.insertBefore(shell, editor); shell.append(lines, highlight, editor);
+  editor.addEventListener('scroll', () => { highlight.scrollTop = editor.scrollTop; highlight.scrollLeft = editor.scrollLeft; lines.scrollTop = editor.scrollTop; }); renderEditorDecorations();
+}
+function setupResizers() {
+  const layout = document.querySelector('.layout'); const firstPanel = layout.children[0]; const secondPanel = layout.children[1]; const left = document.createElement('div'); const middle = document.createElement('div'); left.className = middle.className = 'resizer'; left.setAttribute('aria-label', '调整工作区宽度'); middle.setAttribute('aria-label', '调整文件列表宽度'); layout.insertBefore(left, secondPanel); layout.insertBefore(middle, secondPanel.nextSibling);
+  const bind = (bar, variable, minimum) => bar.addEventListener('pointerdown', (event) => { const start = event.clientX; const initial = parseInt(getComputedStyle(document.documentElement).getPropertyValue(variable), 10); bar.classList.add('dragging'); bar.setPointerCapture(event.pointerId); const move = (next) => { const value = Math.max(minimum, Math.min(initial + next.clientX - start, window.innerWidth - 430)); document.documentElement.style.setProperty(variable, `${value}px`); }; const end = async () => { bar.classList.remove('dragging'); bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', end); await put('layout', { workspace: getComputedStyle(document.documentElement).getPropertyValue('--workspace-width').trim(), files: getComputedStyle(document.documentElement).getPropertyValue('--files-width').trim() }); }; bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', end); });
+  bind(left, '--workspace-width', 180); bind(middle, '--files-width', 260);
+}
+
 async function render() { await renderWorkspaces(); await renderFiles(); }
-async function init() { state.workspaces = store.normalizeWorkspaces(await get('workspaces')); if (!state.workspaces.length) { const legacy = await get('workspace'); if (legacy?.name && legacy.handle) state.workspaces = [{ id: makeId(), name: legacy.name, handle: legacy.handle }]; } state.activeWorkspaceId = store.selectWorkspace(state.workspaces, await get('activeWorkspaceId')); await persist(); navigator.storage?.persist?.(); await render(); setStatus(state.workspaces.length ? '已恢复工作区列表。选择工作区后查看文件。' : '准备就绪。'); }
-$('addWorkspace').addEventListener('click', addWorkspace); $('fileSearch').addEventListener('input', renderFiles); $('globalSearch').addEventListener('input', () => { clearTimeout(state.globalTimer); state.globalTimer = setTimeout(renderGlobalSearch, 250); }); $('editor').addEventListener('input', () => markDirty(true)); $('encodingSelect').addEventListener('change', changeEncoding); $('save').addEventListener('click', save); $('saveAs').addEventListener('click', saveAs); window.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); } }); window.addEventListener('beforeunload', (event) => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } }); if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {}); init();
+async function init() { setupEditorChrome(); setupResizers(); const layout = await get('layout'); if (layout?.workspace) document.documentElement.style.setProperty('--workspace-width', layout.workspace); if (layout?.files) document.documentElement.style.setProperty('--files-width', layout.files); state.workspaces = store.normalizeWorkspaces(await get('workspaces')); if (!state.workspaces.length) { const legacy = await get('workspace'); if (legacy?.name && legacy.handle) state.workspaces = [{ id: makeId(), name: legacy.name, handle: legacy.handle }]; } state.activeWorkspaceId = store.selectWorkspace(state.workspaces, await get('activeWorkspaceId')); await persist(); navigator.storage?.persist?.(); await render(); setStatus(state.workspaces.length ? '已恢复工作区列表。选择工作区后查看文件。' : '准备就绪。'); }
+document.querySelector('.fileTable th.name').addEventListener('click', () => sortFiles('name')); document.querySelector('.fileTable th.time').addEventListener('click', () => sortFiles('modified')); document.querySelector('.fileTable th.type').addEventListener('click', () => sortFiles('extension')); $('addWorkspace').addEventListener('click', addWorkspace); $('fileSearch').addEventListener('input', renderFiles); $('globalSearch').addEventListener('input', () => { clearTimeout(state.globalTimer); state.globalTimer = setTimeout(renderGlobalSearch, 250); }); $('editor').addEventListener('input', () => { markDirty(true); renderEditorDecorations(); }); $('encodingSelect').addEventListener('change', changeEncoding); $('save').addEventListener('click', save); $('saveAs').addEventListener('click', saveAs); window.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); } }); window.addEventListener('beforeunload', (event) => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } }); if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {}); init();
 
 },{"./codec":42,"./file-model":43,"./workspace-store":44}],42:[function(require,module,exports){
 (function (Buffer){(function (){
@@ -8765,11 +8785,17 @@ module.exports = {
 
 }).call(this)}).call(this,require("buffer").Buffer)
 },{"buffer":3,"chardet":11,"iconv-lite":34}],43:[function(require,module,exports){
-function filterFiles(files, query) {
+function filterFiles(files, query, sort = { key: 'modified', direction: 'desc' }) {
   const term = String(query || '').trim().toLocaleLowerCase();
+  const multiplier = sort.direction === 'asc' ? 1 : -1;
   return [...files]
     .filter((file) => !term || [file.name, file.path, file.extension].some((value) => String(value || '').toLocaleLowerCase().includes(term)))
-    .sort((left, right) => (right.modified || 0) - (left.modified || 0) || left.path.localeCompare(right.path, 'zh-CN'));
+    .sort((left, right) => {
+      const a = sort.key === 'modified' ? left.modified || 0 : String(left[sort.key] || '');
+      const b = sort.key === 'modified' ? right.modified || 0 : String(right[sort.key] || '');
+      const comparison = typeof a === 'number' ? a - b : a.localeCompare(b, 'zh-CN');
+      return comparison * multiplier || left.path.localeCompare(right.path, 'zh-CN');
+    });
 }
 
 function formatFileTime(timestamp) {
@@ -8804,6 +8830,15 @@ function removeWorkspace(workspaces, id, activeId) {
   return { workspaces: remaining, activeId: selectWorkspace(remaining, activeId) };
 }
 
-module.exports = { normalizeWorkspaces, removeWorkspace, selectWorkspace };
+function moveWorkspace(workspaces, movingId, beforeId) {
+  const moving = workspaces.find((workspace) => workspace.id === movingId);
+  if (!moving || movingId === beforeId) return workspaces;
+  const remaining = workspaces.filter((workspace) => workspace.id !== movingId);
+  const index = remaining.findIndex((workspace) => workspace.id === beforeId);
+  remaining.splice(index < 0 ? remaining.length : index, 0, moving);
+  return remaining;
+}
+
+module.exports = { moveWorkspace, normalizeWorkspaces, removeWorkspace, selectWorkspace };
 
 },{}]},{},[41]);
