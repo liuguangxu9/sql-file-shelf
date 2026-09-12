@@ -371,8 +371,12 @@ async function renderFiles() {
     row.addEventListener("click", () => openFile(workspace.id, entry));
     const name = document.createElement("td");
     name.className = "name";
-    name.textContent = entry.path;
     name.title = entry.path;
+    const content = document.createElement("div");
+    content.className = "fileNameCell";
+    const label = document.createElement("span");
+    label.className = "fileNameText";
+    label.textContent = entry.path;
     const remove = document.createElement("button");
     remove.className = "fileDelete";
     remove.title = `删除 ${entry.path}`;
@@ -381,7 +385,8 @@ async function renderFiles() {
       event.stopPropagation();
       deleteFile(entry);
     });
-    name.append(remove);
+    content.append(label, remove);
+    name.append(content);
     const time = document.createElement("td");
     time.className = "time";
     time.textContent = files.formatFileTime(entry.modified);
