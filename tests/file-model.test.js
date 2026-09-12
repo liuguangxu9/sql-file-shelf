@@ -20,3 +20,8 @@ test('matches file name, relative path, and extension without case sensitivity',
 test('formats an absent timestamp safely', () => {
   assert.equal(formatFileTime(0), '—');
 });
+
+test('sorts files by an explicitly selected column and direction', () => {
+  assert.deepEqual(filterFiles(files, '', { key: 'name', direction: 'asc' }).map((file) => file.name), ['archive.txt', 'notes.md', 'report.sql']);
+  assert.deepEqual(filterFiles(files, '', { key: 'extension', direction: 'desc' }).map((file) => file.name), ['archive.txt', 'report.sql', 'notes.md']);
+});

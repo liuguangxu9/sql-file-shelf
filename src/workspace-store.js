@@ -22,4 +22,13 @@ function removeWorkspace(workspaces, id, activeId) {
   return { workspaces: remaining, activeId: selectWorkspace(remaining, activeId) };
 }
 
-module.exports = { normalizeWorkspaces, removeWorkspace, selectWorkspace };
+function moveWorkspace(workspaces, movingId, beforeId) {
+  const moving = workspaces.find((workspace) => workspace.id === movingId);
+  if (!moving || movingId === beforeId) return workspaces;
+  const remaining = workspaces.filter((workspace) => workspace.id !== movingId);
+  const index = remaining.findIndex((workspace) => workspace.id === beforeId);
+  remaining.splice(index < 0 ? remaining.length : index, 0, moving);
+  return remaining;
+}
+
+module.exports = { moveWorkspace, normalizeWorkspaces, removeWorkspace, selectWorkspace };

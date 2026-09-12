@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizeWorkspaces, removeWorkspace, selectWorkspace } = require('../src/workspace-store');
+const { moveWorkspace, normalizeWorkspaces, removeWorkspace, selectWorkspace } = require('../src/workspace-store');
 
 test('restores valid persisted workspaces and ignores malformed entries', () => {
   const workspaces = normalizeWorkspaces([
@@ -27,4 +27,11 @@ test('selectWorkspace only accepts an existing workspace id', () => {
   const workspaces = normalizeWorkspaces([{ id: 'a', name: 'SQL', handle: { kind: 'directory' } }]);
   assert.equal(selectWorkspace(workspaces, 'missing', 'a'), 'a');
   assert.equal(selectWorkspace(workspaces, 'a', null), 'a');
+});
+
+test('moves a workspace to the requested position without changing other entries', () => {
+  const workspaces = normalizeWorkspaces([
+    { id: 'a', name: 'SQL', handle: {} }, { id: 'b', name: 'Notes', handle: {} }, { id: 'c', name: 'Archive', handle: {} },
+  ]);
+  assert.deepEqual(moveWorkspace(workspaces, 'c', 'a').map((workspace) => workspace.id), ['c', 'a', 'b']);
 });

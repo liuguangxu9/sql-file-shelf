@@ -1,8 +1,14 @@
-function filterFiles(files, query) {
+function filterFiles(files, query, sort = { key: 'modified', direction: 'desc' }) {
   const term = String(query || '').trim().toLocaleLowerCase();
+  const multiplier = sort.direction === 'asc' ? 1 : -1;
   return [...files]
     .filter((file) => !term || [file.name, file.path, file.extension].some((value) => String(value || '').toLocaleLowerCase().includes(term)))
-    .sort((left, right) => (right.modified || 0) - (left.modified || 0) || left.path.localeCompare(right.path, 'zh-CN'));
+    .sort((left, right) => {
+      const a = sort.key === 'modified' ? left.modified || 0 : String(left[sort.key] || '');
+      const b = sort.key === 'modified' ? right.modified || 0 : String(right[sort.key] || '');
+      const comparison = typeof a === 'number' ? a - b : a.localeCompare(b, 'zh-CN');
+      return comparison * multiplier || left.path.localeCompare(right.path, 'zh-CN');
+    });
 }
 
 function formatFileTime(timestamp) {
