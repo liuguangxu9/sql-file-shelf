@@ -8618,7 +8618,7 @@ async function renderGlobalSearch() {
     }
     if (results.length >= 80) break;
   }
-  for (const { workspace, entry } of results) { const button = document.createElement('button'); button.className = 'result'; button.innerHTML = `<strong>${entry.name}</strong><small>${workspace.name} / ${entry.path}</small>`; button.addEventListener('click', async () => { if (state.activeWorkspaceId !== workspace.id) { state.activeWorkspaceId = workspace.id; await persist(); } await openFile(workspace.id, entry); await render(); }); target.append(button); }
+  for (const { workspace, entry } of results) { const button = document.createElement('button'); button.className = 'result'; const title = document.createElement('strong'); title.textContent = entry.name; const location = document.createElement('small'); location.textContent = `${workspace.name} / ${entry.path}`; button.append(title, location); button.addEventListener('click', async () => { if (state.activeWorkspaceId !== workspace.id) { state.activeWorkspaceId = workspace.id; await persist(); } await openFile(workspace.id, entry); await render(); }); target.append(button); }
   if (!results.length) target.innerHTML = '<div class="placeholder">没有找到匹配内容。</div>'; setStatus(`找到 ${results.length} 个匹配文件。`);
 }
 
