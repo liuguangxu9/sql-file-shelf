@@ -128,13 +128,26 @@
         font-weight: 650;
       }
       .fileDelete {
-        float: right;
+        flex: 0 0 auto;
         border: 0;
         background: transparent;
         color: #9aa5b5;
         padding: 0 2px;
         font-size: 16px;
         line-height: 1;
+      }
+      .fileNameCell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .fileNameText {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .fileDelete:hover {
         color: var(--danger);
@@ -448,8 +461,12 @@
               ><span class="panelActions"
                 ><button id="refreshFiles" title="刷新当前工作区文件">
                   刷新</button
-                ><button id="newFile" title="在工作区根目录新建文件">
-                  ＋ 新建</button
+                ><button
+                  id="newFile"
+                  class="primary"
+                  title="在工作区根目录新建文件"
+                >
+                  新建</button
                 ><span id="fileCount">0 个</span></span
               >
             </div>
