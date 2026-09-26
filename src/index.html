@@ -293,12 +293,18 @@
         background: #fff;
       }
       .editorHead {
-        padding: 0 20px;
-        height: 62px;
+        padding: 10px 20px;
+        min-height: 62px;
         border-bottom: 1px solid var(--line);
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: 14px;
+      }
+      .editorHead button,
+      .editorHead select {
+        flex-shrink: 0;
+        white-space: nowrap;
       }
       .fileIdentity {
         flex: 1;
@@ -367,9 +373,12 @@
           "Cascadia Code",
           monospace;
         tab-size: 2;
-        white-space: pre-wrap;
+        white-space: pre;
         overflow-wrap: normal;
         pointer-events: none;
+      }
+      .highlight code {
+        font: inherit;
       }
       .editor {
         position: absolute;
@@ -520,6 +529,7 @@
           <textarea
             id="editor"
             class="editor"
+            wrap="off"
             spellcheck="false"
             disabled
             aria-label="文件编辑器"

@@ -61,6 +61,13 @@ test("accepts a root-level supported filename when creating a file", () => {
   });
 });
 
+test("adds the default SQL extension to a new file without one", () => {
+  assert.deepEqual(validateNewFileName("  月报  "), {
+    valid: true,
+    name: "月报.sql",
+  });
+});
+
 test("rejects paths and unsupported filenames when creating a file", () => {
   assert.equal(validateNewFileName("reports/draft.sql").valid, false);
   assert.equal(validateNewFileName("draft.exe").valid, false);
