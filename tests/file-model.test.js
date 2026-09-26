@@ -4,6 +4,7 @@ const {
   filterFiles,
   formatFileTime,
   validateNewFileName,
+  validateFolderName,
 } = require("../src/file-model");
 
 const files = [
@@ -71,4 +72,10 @@ test("adds the default SQL extension to a new file without one", () => {
 test("rejects paths and unsupported filenames when creating a file", () => {
   assert.equal(validateNewFileName("reports/draft.sql").valid, false);
   assert.equal(validateNewFileName("draft.exe").valid, false);
+});
+
+test("accepts one folder name but rejects paths and reserved characters", () => {
+  assert.deepEqual(validateFolderName("  报表  "), { valid: true, name: "报表" });
+  assert.equal(validateFolderName("上级/报表").valid, false);
+  assert.equal(validateFolderName("A:B").valid, false);
 });

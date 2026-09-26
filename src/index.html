@@ -128,7 +128,6 @@
         font-weight: 650;
       }
       .fileDelete {
-        margin-left: auto;
         flex: 0 0 auto;
         border: 0;
         background: transparent;
@@ -153,6 +152,52 @@
       }
       .fileDelete:hover {
         color: var(--danger);
+      }
+      .fileAction {
+        flex: 0 0 auto;
+        border: 0;
+        background: transparent;
+        padding: 0 2px;
+        color: #60718b;
+        line-height: 1;
+      }
+      .fileAction:hover {
+        color: var(--blue);
+      }
+      .directorySelect {
+        width: 100%;
+        margin-top: 8px;
+        padding: 7px 9px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+      }
+      .fileDialog {
+        width: min(430px, calc(100vw - 32px));
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 22px;
+        box-shadow: 0 16px 48px #17203333;
+      }
+      .fileDialog::backdrop { background: #17203355; }
+      .fileDialog h2 { margin: 0 0 16px; font-size: 17px; }
+      .fileDialog label { display: block; margin: 12px 0; color: #53627a; }
+      .fileDialog input,
+      .fileDialog select { display: block; width: 100%; margin-top: 5px; padding: 9px; }
+      .dialogActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+      .conflictDialog { width: min(980px, calc(100vw - 32px)); }
+      .conflictDialog p { color: var(--muted); }
+      .conflictCompare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .conflictCompare section { min-width: 0; }
+      .conflictCompare pre {
+        height: min(45vh, 360px);
+        overflow: auto;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--soft);
+        white-space: pre;
       }
       .search {
         width: 100%;
@@ -254,11 +299,13 @@
         border-bottom: 1px solid var(--line);
         cursor: pointer;
         user-select: none;
+        white-space: nowrap;
       }
       .fileTable th:hover {
         color: var(--blue);
         background: var(--soft);
       }
+      .fileTable th.type { padding-left: 5px; padding-right: 5px; }
       .fileTable td {
         padding: 9px 13px;
         border-bottom: 1px solid #eef1f5;
@@ -473,9 +520,13 @@
                 ><button id="refreshFiles" title="刷新当前工作区文件">
                   刷新</button
                 ><button
+                  id="newFolder"
+                  title="在所选目录下新建子目录"
+                >新目录</button
+                ><button
                   id="newFile"
                   class="primary"
-                  title="在工作区根目录新建文件"
+                  title="在所选目录下新建文件"
                 >
                   新建</button
                 ><span id="fileCount">0 个</span></span
@@ -486,6 +537,7 @@
               class="search"
               placeholder="筛选当前工作区文件"
             />
+            <select id="directorySelect" class="directorySelect" aria-label="新建文件的目标目录" disabled></select>
           </div>
           <div class="scroll">
             <table class="fileTable">
@@ -538,6 +590,6 @@
       </section>
       <footer id="status" class="status">准备就绪</footer>
     </main>
-    <script src="./app.js?v=8"></script>
+    <script src="./app.js?v=9"></script>
   </body>
 </html>

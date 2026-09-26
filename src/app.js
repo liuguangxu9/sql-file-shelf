@@ -1,11 +1,13 @@
 const codec = require("./codec");
 const store = require("./workspace-store");
 const files = require("./file-model");
+const operations = require("./file-operations");
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const state = {
   workspaces: [],
   activeWorkspaceId: null,
   fileCache: new Map(),
+  folderCache: new Map(),
   active: null,
   dirty: false,
   globalTimer: null,
@@ -82,12 +84,14 @@ function updateEditorInfo() {
   $("encodingSelect").value = active.metadata.encoding;
 }
 
-async function walk(directory, path = "") {
+async function walk(directory, path = "", folders = []) {
   const result = [];
   for await (const [, handle] of directory.entries()) {
     const relative = path ? `${path}/${handle.name}` : handle.name;
-    if (handle.kind === "directory")
-      result.push(...(await walk(handle, relative)));
+    if (handle.kind === "directory") {
+      folders.push({ path: relative, handle });
+      result.push(...(await walk(handle, relative, folders)));
+    }
     if (handle.kind === "file" && ACCEPTED.has(extension(handle.name))) {
       const file = await handle.getFile();
       result.push({
@@ -105,8 +109,10 @@ async function walk(directory, path = "") {
 
 async function scanWorkspace(workspace) {
   if (!workspace || !(await permission(workspace.handle))) return [];
-  const result = await walk(workspace.handle);
+  const folders = [{ path: "", handle: workspace.handle }];
+  const result = await walk(workspace.handle, "", folders);
   state.fileCache.set(workspace.id, result);
+  state.folderCache.set(workspace.id, folders);
   return result;
 }
 
@@ -201,6 +207,7 @@ async function removeWorkspace(id) {
   state.workspaces = result.workspaces;
   state.activeWorkspaceId = result.activeId;
   state.fileCache.delete(id);
+  state.folderCache.delete(id);
   if (state.active?.workspaceId === id) {
     state.active = null;
     $("editor").value = "";
@@ -216,9 +223,7 @@ async function openFile(workspaceId, entry) {
   try {
     if (state.dirty && !confirm("当前文件尚未保存，仍要打开其他文件吗？"))
       return;
-    const bytes = new Uint8Array(
-      await (await entry.handle.getFile()).arrayBuffer(),
-    );
+    const bytes = await operations.readBytes(entry.handle);
     const metadata = codec.detectEncoding(bytes);
     const text = codec.decodeFileBytes(bytes, metadata);
     state.active = {
@@ -226,6 +231,7 @@ async function openFile(workspaceId, entry) {
       ...entry,
       metadata,
       newline: codec.detectNewline(text),
+      originalBytes: bytes,
     };
     $("editor").value = text;
     $("editor").disabled = false;
@@ -246,8 +252,9 @@ async function newFile() {
   if (!workspace) return setStatus("请先选择一个工作区。", true);
   if (!(await permission(workspace.handle)))
     return setStatus(`“${workspace.name}”尚未获得访问授权。`, true);
+  const folder = selectedFolder(workspace);
   const requestedName = prompt(
-    "新建文件（保存到工作区根目录）：",
+    `新建文件（保存到 ${folder.path || "工作区根目录"}）：`,
     "untitled.sql",
   );
   if (requestedName === null) return;
@@ -255,18 +262,50 @@ async function newFile() {
   if (!result.valid) return result.error && setStatus(result.error, true);
   try {
     const existing = (state.fileCache.get(workspace.id) || []).find(
-      (entry) => entry.path === result.name,
+      (entry) => entry.path === joinedPath(folder.path, result.name),
     );
     if (existing && !confirm(`“${result.name}”已存在。是否打开它？`)) return;
-    await workspace.handle.getFileHandle(result.name, { create: true });
+    await folder.handle.getFileHandle(result.name, { create: true });
     await scanWorkspace(workspace);
     const entry = (state.fileCache.get(workspace.id) || []).find(
-      (item) => item.path === result.name,
+      (item) => item.path === joinedPath(folder.path, result.name),
     );
     if (entry) await openFile(workspace.id, entry);
     setStatus(existing ? `已打开 ${result.name}。` : `已新建 ${result.name}。`);
   } catch (error) {
     setStatus(`新建失败：${error.message}`, true);
+  }
+}
+
+const joinedPath = (folder, name) => (folder ? `${folder}/${name}` : name);
+
+function selectedFolder(workspace) {
+  return (state.folderCache.get(workspace.id) || []).find(
+    (folder) => folder.path === $("directorySelect").value,
+  ) || { path: "", handle: workspace.handle };
+}
+
+async function newFolder() {
+  const workspace = current();
+  if (!workspace || !(await permission(workspace.handle)))
+    return setStatus("请先选择并授权一个工作区。", true);
+  const parent = selectedFolder(workspace);
+  const requested = prompt(`在 ${parent.path || "工作区根目录"} 下新建目录：`, "新目录");
+  if (requested === null) return;
+  const result = files.validateFolderName(requested);
+  if (!result.valid) return setStatus(result.error, true);
+  const path = joinedPath(parent.path, result.name);
+  if ((state.folderCache.get(workspace.id) || []).some((item) => item.path === path))
+    return setStatus(`目录“${path}”已存在。`, true);
+  try {
+    await parent.handle.getDirectoryHandle(result.name, { create: true });
+    await scanWorkspace(workspace);
+    renderDirectorySelect();
+    $("directorySelect").value = path;
+    await renderFiles();
+    setStatus(`已新建目录 ${path}。`);
+  } catch (error) {
+    setStatus(`新建目录失败：${error.message}`, true);
   }
 }
 
@@ -297,6 +336,89 @@ async function deleteFile(entry) {
     setStatus(`已删除 ${entry.path}。`);
   } catch (error) {
     setStatus(`删除失败：${error.message}`, true);
+  }
+}
+
+function chooseFileLocation(entry, folders) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "fileDialog";
+    const heading = document.createElement("h2");
+    heading.textContent = "重命名或移动文件";
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "文件名";
+    const name = document.createElement("input");
+    name.value = entry.name;
+    nameLabel.append(name);
+    const folderLabel = document.createElement("label");
+    folderLabel.textContent = "目标目录";
+    const folder = document.createElement("select");
+    const currentPath = entry.path.slice(0, entry.path.length - entry.name.length).replace(/\/$/, "");
+    for (const item of folders) {
+      const option = document.createElement("option");
+      option.value = item.path;
+      option.textContent = item.path || "工作区根目录";
+      folder.append(option);
+    }
+    folder.value = currentPath;
+    folderLabel.append(folder);
+    const actions = document.createElement("div");
+    actions.className = "dialogActions";
+    const cancel = document.createElement("button");
+    cancel.textContent = "取消";
+    const apply = document.createElement("button");
+    apply.className = "primary";
+    apply.textContent = "应用";
+    actions.append(cancel, apply);
+    dialog.append(heading, nameLabel, folderLabel, actions);
+    document.body.append(dialog);
+    let answer = null;
+    cancel.addEventListener("click", () => dialog.close());
+    apply.addEventListener("click", () => {
+      answer = { name: name.value, path: folder.value };
+      dialog.close();
+    });
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      resolve(answer);
+    }, { once: true });
+    dialog.showModal();
+    name.focus();
+    name.select();
+  });
+}
+
+async function editFileLocation(entry) {
+  const workspace = current();
+  if (!workspace || !(await permission(workspace.handle)))
+    return setStatus("请先恢复工作区访问权限。", true);
+  if (state.dirty && state.active?.workspaceId === workspace.id && state.active.path === entry.path)
+    return setStatus("请先保存当前文件，再重命名或移动。", true);
+  const folders = state.folderCache.get(workspace.id) || [];
+  const choice = await chooseFileLocation(entry, folders);
+  if (!choice) return;
+  const requestedName = choice.name.trim();
+  const validated = files.validateNewFileName(
+    requestedName.includes(".") ? requestedName : `${requestedName}.${entry.extension}`,
+  );
+  if (!validated.valid) return setStatus(validated.error, true);
+  const targetFolder = folders.find((item) => item.path === choice.path);
+  if (!targetFolder) return setStatus("目标目录已失效，请刷新文件列表。", true);
+  const targetPath = joinedPath(targetFolder.path, validated.name);
+  if (targetPath === entry.path) return;
+  try {
+    await operations.relocateFile(entry, targetFolder.handle, validated.name);
+    await scanWorkspace(workspace);
+    const moved = (state.fileCache.get(workspace.id) || []).find((item) => item.path === targetPath);
+    if (state.active?.workspaceId === workspace.id && state.active.path === entry.path && moved) {
+      markDirty(false);
+      await openFile(workspace.id, moved);
+    } else {
+      await renderFiles();
+    }
+    setStatus(`已移动或重命名为 ${targetPath}。`);
+  } catch (error) {
+    setStatus(`操作失败：${error.message}`, true);
   }
 }
 
@@ -356,7 +478,24 @@ async function renderWorkspaces() {
       '<div class="placeholder">点击“新增工作区”，可逐个添加你的分类目录。</div>';
 }
 
+function renderDirectorySelect() {
+  const select = $("directorySelect");
+  const previous = select.value;
+  select.replaceChildren();
+  const workspace = current();
+  for (const folder of state.folderCache.get(workspace?.id) || []) {
+    const option = document.createElement("option");
+    option.value = folder.path;
+    option.textContent = folder.path || "工作区根目录";
+    select.append(option);
+  }
+  select.value = previous;
+  if (select.selectedIndex < 0) select.selectedIndex = 0;
+  select.disabled = !workspace || !select.options.length;
+}
+
 async function renderFiles() {
+  renderDirectorySelect();
   const body = $("fileList");
   body.replaceChildren();
   const workspace = current();
@@ -377,6 +516,15 @@ async function renderFiles() {
     const label = document.createElement("span");
     label.className = "fileNameText";
     label.textContent = entry.path;
+    const editLocation = document.createElement("button");
+    editLocation.className = "fileAction";
+    editLocation.title = `重命名或移动 ${entry.path}`;
+    editLocation.setAttribute("aria-label", editLocation.title);
+    editLocation.textContent = "⋯";
+    editLocation.addEventListener("click", (event) => {
+      event.stopPropagation();
+      editFileLocation(entry);
+    });
     const remove = document.createElement("button");
     remove.className = "fileDelete";
     remove.title = `删除 ${entry.path}`;
@@ -385,7 +533,7 @@ async function renderFiles() {
       event.stopPropagation();
       deleteFile(entry);
     });
-    content.append(label, remove);
+    content.append(label, editLocation, remove);
     name.append(content);
     const time = document.createElement("td");
     time.className = "time";
@@ -477,36 +625,114 @@ function saveBytes() {
   const text = codec.normalizeNewlines($("editor").value, state.active.newline);
   return { text, bytes: codec.encodeForSave(text, state.active.metadata) };
 }
-async function writeTo(handle, parent, backup) {
+class FileConflictError extends Error {
+  constructor(diskBytes) {
+    super("磁盘上的文件已被其他程序修改。");
+    this.diskBytes = diskBytes;
+  }
+}
+
+async function writeTo(handle, parent, { backup, expectedBytes, name, path, payload }) {
   const owner = state.workspaces.find(
     (item) => item.id === state.active.workspaceId,
   );
   if (!owner || !(await permission(owner.handle)))
     throw new Error("没有当前工作区的写入权限，请点击“恢复此目录访问”。");
-  const { text, bytes } = saveBytes();
+  const { text, bytes } = payload || saveBytes();
+  const diskBytes = await operations.readBytes(handle);
+  if (!operations.sameBytes(expectedBytes, diskBytes))
+    throw new FileConflictError(diskBytes);
   if (backup) {
-    const old = await state.active.handle.getFile();
     const copy = await parent.getFileHandle(`${handle.name}.bak`, {
       create: true,
     });
-    const writer = await copy.createWritable();
-    await writer.write(await old.arrayBuffer());
-    await writer.close();
+    await operations.writeBytes(copy, diskBytes);
   }
-  const writer = await handle.createWritable();
-  await writer.write(bytes);
-  await writer.close();
-  state.active.handle = handle;
-  state.active.parent = parent;
+  await operations.writeBytes(handle, bytes);
+  Object.assign(state.active, {
+    handle, parent, name, path, extension: extension(name), originalBytes: bytes,
+  });
   $("editor").value = text;
+  $("fileTitle").textContent = name;
+  $("filePath").textContent = `${owner.name} / ${path}`;
   markDirty(false);
   await scanWorkspace(owner);
   await renderFiles();
+  renderEditorDecorations();
 }
+
+function showConflict(diskBytes) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "fileDialog conflictDialog";
+    const heading = document.createElement("h2");
+    heading.textContent = "磁盘文件已有新修改";
+    const description = document.createElement("p");
+    description.textContent = "请比较两份内容，再选择如何处理。覆盖前会为磁盘版本生成 .bak。";
+    const compare = document.createElement("div");
+    compare.className = "conflictCompare";
+    let diskText;
+    try {
+      diskText = codec.decodeFileBytes(diskBytes, codec.detectEncoding(diskBytes));
+    } catch (error) {
+      diskText = `无法预览磁盘版本：${error.message}`;
+    }
+    for (const [title, value] of [["磁盘版本", diskText], ["当前编辑", $("editor").value]]) {
+      const pane = document.createElement("section");
+      const label = document.createElement("strong");
+      label.textContent = title;
+      const preview = document.createElement("pre");
+      preview.textContent = value;
+      pane.append(label, preview);
+      compare.append(pane);
+    }
+    const actions = document.createElement("div");
+    actions.className = "dialogActions";
+    for (const [label, value, primary] of [
+      ["取消", "cancel", false], ["重新加载磁盘版", "reload", false],
+      ["另存为", "saveAs", false], ["覆盖磁盘版", "overwrite", true],
+    ]) {
+      const button = document.createElement("button");
+      button.textContent = label;
+      if (primary) button.className = "primary";
+      button.addEventListener("click", () => dialog.close(value));
+      actions.append(button);
+    }
+    dialog.append(heading, description, compare, actions);
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => {
+      const choice = dialog.returnValue || "cancel";
+      dialog.remove();
+      resolve(choice);
+    }, { once: true });
+    dialog.showModal();
+  });
+}
+
 async function save() {
   try {
     if (!state.active) return;
-    await writeTo(state.active.handle, state.active.parent, true);
+    let expected = state.active.originalBytes;
+    while (true) {
+      try {
+        await writeTo(state.active.handle, state.active.parent, {
+          backup: true, expectedBytes: expected,
+          name: state.active.name, path: state.active.path,
+        });
+        break;
+      } catch (error) {
+        if (!(error instanceof FileConflictError)) throw error;
+        const choice = await showConflict(error.diskBytes);
+        if (choice === "saveAs") return saveAs();
+        if (choice === "reload") {
+          markDirty(false);
+          await openFile(state.active.workspaceId, state.active);
+          return setStatus("已重新加载磁盘版本。");
+        }
+        if (choice !== "overwrite") return setStatus("已取消保存；当前编辑内容仍在。", true);
+        expected = error.diskBytes;
+      }
+    }
     setStatus("已保存，并生成同目录 .bak 备份。");
   } catch (error) {
     setStatus(error.message, true);
@@ -517,18 +743,27 @@ async function saveAs() {
   const owner = state.workspaces.find(
     (item) => item.id === state.active.workspaceId,
   );
-  const name = prompt("另存为（保存到工作区根目录）：", state.active.name);
-  if (!name) return;
-  if (!ACCEPTED.has(extension(name)))
-    return setStatus("仅支持 .sql、.txt、.md。", true);
+  const requested = prompt("另存为（保存到工作区根目录）：", state.active.name);
+  if (requested === null) return;
+  const name = requested.trim().includes(".") ? requested : `${requested}.${state.active.extension}`;
+  const validated = files.validateNewFileName(name);
+  if (!validated.valid) return setStatus(validated.error, true);
   try {
-    const handle = await owner.handle.getFileHandle(name, { create: true });
-    await writeTo(handle, owner.handle, false);
-    $("fileTitle").textContent = name;
-    $("filePath").textContent = `${owner.name} / ${name}`;
-    setStatus(`已另存为 ${name}。`);
+    const payload = saveBytes();
+    const existing = await operations.findFile(owner.handle, validated.name);
+    if (existing && await existing.isSameEntry(state.active.handle)) return save();
+    if (existing && !confirm(`“${validated.name}”已存在。确定覆盖并保留 .bak 备份吗？`)) return;
+    const handle = existing || await owner.handle.getFileHandle(validated.name, { create: true });
+    const expectedBytes = await operations.readBytes(handle);
+    if (!existing && expectedBytes.length)
+      throw new Error("目标文件在另存期间出现，请重新确认文件名。");
+    await writeTo(handle, owner.handle, {
+      backup: Boolean(existing), expectedBytes, name: validated.name,
+      path: validated.name, payload,
+    });
+    setStatus(`已另存为 ${validated.name}${existing ? "，并备份原文件" : ""}。`);
   } catch (error) {
-    setStatus(`另存失败：${error.message}`, true);
+    setStatus(`另存失败：${error instanceof FileConflictError ? "目标文件在保存前又被修改，请重试。" : error.message}`, true);
   }
 }
 function changeEncoding() {
@@ -688,6 +923,7 @@ document
 $("addWorkspace").addEventListener("click", addWorkspace);
 $("refreshFiles").addEventListener("click", refreshCurrentWorkspace);
 $("newFile").addEventListener("click", newFile);
+$("newFolder").addEventListener("click", newFolder);
 $("fileSearch").addEventListener("input", renderFiles);
 $("globalSearch").addEventListener("input", () => {
   clearTimeout(state.globalTimer);

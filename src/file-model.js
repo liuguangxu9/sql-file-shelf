@@ -51,7 +51,8 @@ function validateNewFileName(value) {
     !filename ||
     filename === "." ||
     filename === ".." ||
-    /[\\/]/.test(filename) ||
+    filename.lastIndexOf(".") === 0 ||
+    /[\\/:*?"<>|]/.test(filename) ||
     !/\.(sql|txt|md)$/i.test(filename)
   ) {
     return {
@@ -62,4 +63,11 @@ function validateNewFileName(value) {
   return { valid: true, name: filename };
 }
 
-module.exports = { filterFiles, formatFileTime, validateNewFileName };
+function validateFolderName(value) {
+  const name = String(value || "").trim();
+  if (!name || name === "." || name === ".." || /[\\/:*?"<>|]/.test(name))
+    return { valid: false, error: "目录名不能为空，且不能包含路径或文件系统保留字符。" };
+  return { valid: true, name };
+}
+
+module.exports = { filterFiles, formatFileTime, validateNewFileName, validateFolderName };
