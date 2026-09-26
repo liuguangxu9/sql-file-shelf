@@ -9398,19 +9398,20 @@ function formatFileTime(timestamp) {
 
 function validateNewFileName(value) {
   const name = String(value || "").trim();
+  const filename = name && !name.includes(".") ? `${name}.sql` : name;
   if (
-    !name ||
-    name === "." ||
-    name === ".." ||
-    /[\\/]/.test(name) ||
-    !/\.(sql|txt|md)$/i.test(name)
+    !filename ||
+    filename === "." ||
+    filename === ".." ||
+    /[\\/]/.test(filename) ||
+    !/\.(sql|txt|md)$/i.test(filename)
   ) {
     return {
       valid: false,
       error: "文件名必须位于工作区根目录，并以 .sql、.txt 或 .md 结尾。",
     };
   }
-  return { valid: true, name };
+  return { valid: true, name: filename };
 }
 
 module.exports = { filterFiles, formatFileTime, validateNewFileName };
