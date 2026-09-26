@@ -74,7 +74,12 @@ function updateEditorInfo() {
   ["save", "saveAs", "encodingSelect"].forEach((id) => {
     $(id).disabled = disabled;
   });
-  if (!active) return;
+  if (!active) {
+    $("encoding").textContent = "—";
+    $("bom").textContent = "—";
+    $("newline").textContent = "—";
+    return;
+  }
   $("encoding").textContent = active.metadata.encoding.toUpperCase();
   $("bom").textContent = active.metadata.bom
     ? active.metadata.bom.toUpperCase()
@@ -82,6 +87,20 @@ function updateEditorInfo() {
   $("newline").textContent =
     active.newline === "crlf" ? "CRLF" : active.newline === "cr" ? "CR" : "LF";
   $("encodingSelect").value = active.metadata.encoding;
+}
+
+function clearEditor() {
+  state.active = null;
+  const editor = $("editor");
+  editor.value = "";
+  editor.disabled = true;
+  editor.scrollTop = 0;
+  editor.scrollLeft = 0;
+  $("fileTitle").textContent = "尚未打开文件";
+  $("filePath").textContent = "从中间的文件列表选择文件。";
+  markDirty(false);
+  updateEditorInfo();
+  renderEditorDecorations();
 }
 
 async function walk(directory, path = "", folders = []) {
@@ -132,7 +151,11 @@ async function refreshCurrentWorkspace() {
 }
 
 async function selectWorkspace(id) {
-  if (state.dirty && !confirm("当前文件尚未保存，仍要切换工作区吗？")) return;
+  if (!state.workspaces.some((item) => item.id === id)) return;
+  if (id !== state.activeWorkspaceId) {
+    if (state.dirty && !confirm("当前文件尚未保存。放弃修改并切换工作区吗？")) return;
+    clearEditor();
+  }
   state.activeWorkspaceId = id;
   await persist();
   const workspace = current();
@@ -163,6 +186,8 @@ async function addWorkspace() {
       await selectWorkspace(existing.id);
       return;
     }
+    if (state.dirty && !confirm("当前文件尚未保存。放弃修改并切换到新工作区吗？")) return;
+    clearEditor();
     const workspace = { id: makeId(), name: handle.name, handle };
     state.workspaces.push(workspace);
     state.activeWorkspaceId = workspace.id;
@@ -194,11 +219,11 @@ async function requestAccess(id) {
 
 async function removeWorkspace(id) {
   const workspace = state.workspaces.find((item) => item.id === id);
-  if (
-    !workspace ||
-    !confirm(`从工具中移除“${workspace.name}”？本地文件不会删除。`)
-  )
-    return;
+  if (!workspace) return;
+  const message = state.activeWorkspaceId === id && state.dirty
+    ? `当前文件尚未保存。放弃修改并从工具中移除“${workspace.name}”吗？本地文件不会删除。`
+    : `从工具中移除“${workspace.name}”？本地文件不会删除。`;
+  if (!confirm(message)) return;
   const result = store.removeWorkspace(
     state.workspaces,
     id,
@@ -209,11 +234,7 @@ async function removeWorkspace(id) {
   state.fileCache.delete(id);
   state.folderCache.delete(id);
   if (state.active?.workspaceId === id) {
-    state.active = null;
-    $("editor").value = "";
-    $("editor").disabled = true;
-    markDirty(false);
-    updateEditorInfo();
+    clearEditor();
   }
   await persist();
   await render();
@@ -221,8 +242,10 @@ async function removeWorkspace(id) {
 
 async function openFile(workspaceId, entry) {
   try {
+    if (state.dirty && state.active?.workspaceId === workspaceId &&
+      state.active.path === entry.path) return true;
     if (state.dirty && !confirm("当前文件尚未保存，仍要打开其他文件吗？"))
-      return;
+      return false;
     const bytes = await operations.readBytes(entry.handle);
     const metadata = codec.detectEncoding(bytes);
     const text = codec.decodeFileBytes(bytes, metadata);
@@ -242,8 +265,10 @@ async function openFile(workspaceId, entry) {
     markDirty(false);
     updateEditorInfo();
     await renderFiles();
+    return true;
   } catch (error) {
     setStatus(`无法打开文件：${error.message}`, true);
+    return false;
   }
 }
 
@@ -325,11 +350,7 @@ async function deleteFile(entry) {
       state.active?.workspaceId === workspace.id &&
       state.active.path === entry.path
     ) {
-      state.active = null;
-      $("editor").value = "";
-      $("editor").disabled = true;
-      markDirty(false);
-      updateEditorInfo();
+      clearEditor();
     }
     await scanWorkspace(workspace);
     await render();
@@ -607,11 +628,11 @@ async function renderGlobalSearch() {
     location.textContent = `${workspace.name} / ${entry.path}`;
     button.append(title, location);
     button.addEventListener("click", async () => {
+      if (!(await openFile(workspace.id, entry))) return;
       if (state.activeWorkspaceId !== workspace.id) {
         state.activeWorkspaceId = workspace.id;
         await persist();
       }
-      await openFile(workspace.id, entry);
       await render();
     });
     target.append(button);
