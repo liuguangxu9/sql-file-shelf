@@ -105,7 +105,14 @@ function buildFileTree(folders, entries, options = {}) {
     for (const entry of fileChildren.get(folder.path) || [])
       rows.push({ kind: "file", path: entry.path, depth: depth + 1, entry });
   }
-  visit(folders.find((folder) => folder.path === scope) || { path: "" }, 0);
+  const root = folders.find((folder) => folder.path === scope) || { path: "" };
+  if (options.hideRoot && scope === "") {
+    for (const child of folderChildren.get("") || []) visit(child, 0);
+    for (const entry of fileChildren.get("") || [])
+      rows.push({ kind: "file", path: entry.path, depth: 0, entry });
+  } else {
+    visit(root, 0);
+  }
   return { rows, count: matches.length };
 }
 

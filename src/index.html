@@ -242,6 +242,7 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        font-size: 14px;
       }
       .workspace button.active {
         background: var(--blue-soft);
@@ -338,6 +339,7 @@
         color: #244c88;
         font-weight: 750;
         text-align: left;
+        font-size: 14px;
       }
       .folderPick:hover { color: var(--blue); }
       .fileRow { padding: 7px 10px 6px; cursor: pointer; }
@@ -368,8 +370,11 @@
       .fileIdentity {
         width: 100%;
         min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
       }
-      .fileIdentity strong { font-size: 13px; }
+      .fileIdentity strong { font-size: 14px; flex: 0 1 auto; max-width: 68%; }
       .fileIdentity strong,
       .fileIdentity small {
         display: block;
@@ -379,9 +384,11 @@
       }
       .fileIdentity small {
         color: var(--muted);
-        font-size: 11px;
-        margin-top: 2px;
+        font-size: 12px;
+        flex: 1 1 0;
+        min-width: 0;
       }
+      .fileIdentity small.isLocation::before { content: "目录  "; color: #647b9a; }
       .editorTools {
         display: flex;
         align-items: center;
@@ -634,6 +641,6 @@
       </section>
       <footer id="status" class="status">准备就绪</footer>
     </main>
-    <script src="./app.js?v=13"></script>
+    <script src="./app.js?v=14"></script>
   </body>
 </html>

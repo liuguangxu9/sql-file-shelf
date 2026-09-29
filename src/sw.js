@@ -1,5 +1,5 @@
-const CACHE = 'sql-file-shelf-v13';
-const ASSETS = ['./', './index.html', './app.js?v=13', './manifest.webmanifest'];
+const CACHE = 'sql-file-shelf-v14';
+const ASSETS = ['./', './index.html', './app.js?v=14', './manifest.webmanifest'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (event) => {

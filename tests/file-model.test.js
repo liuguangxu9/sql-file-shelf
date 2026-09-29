@@ -132,3 +132,18 @@ test("collapsed folders keep their files hidden without changing the match count
     "archive.txt",
   ]);
 });
+
+test("hides workspace root without indenting its direct children", () => {
+  const result = buildFileTree(
+    [{ path: "" }, { path: "docs" }, { path: "docs/nested" }],
+    files,
+    { expanded: ["", "docs"], hideRoot: true },
+  );
+  assert.equal(result.count, 3);
+  assert.deepEqual(result.rows.map(({ kind, path, depth }) => [kind, path, depth]), [
+    ["folder", "docs", 0],
+    ["folder", "docs/nested", 1],
+    ["file", "docs/notes.md", 1],
+    ["file", "archive.txt", 0],
+  ]);
+});
