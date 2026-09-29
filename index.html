@@ -314,27 +314,29 @@
       .sortMenu button:hover, .sortMenu button.selected { background: var(--blue-soft); }
       .sortMenuDivider { height: 1px; margin: 5px 0; background: var(--line); }
       .fileTree { min-width: 0; }
-      .fileTree > div { border-bottom: 1px solid #eef1f5; }
-      .folderRow { padding: 5px 10px; background: #f7faff; cursor: pointer; }
-      .folderRow.open { background: #edf5ff; box-shadow: inset 3px 0 #8ab4f4; }
-      .folderRow.selected { background: #dceaff; box-shadow: inset 3px 0 var(--blue); }
-      .folderRow:hover { background: #e4efff; }
+      .fileTree > div { border-bottom: 1px solid #f0f3f7; }
+      .folderRow { padding: 5px 10px; background: #fafbfd; cursor: pointer; transition: background-color .18s ease, box-shadow .18s ease; }
+      .folderRow.open { background: #f8faff; }
+      .folderRow.selected { background: #eef4fc; box-shadow: inset 2px 0 #9dc3f2; }
+      .folderRow:hover { background: #edf3fb; }
       .treeNameCell { display: flex; align-items: center; min-width: 0; }
       .treeToggle {
-        flex: 0 0 22px;
-        height: 22px;
-        border: 1px solid #c7d9f4;
-        border-radius: 5px;
+        flex: 0 0 24px;
+        width: 24px;
+        height: 24px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: 6px;
         padding: 0;
-        background: #fff;
-        color: #285da8;
-        font-size: 13px;
-        line-height: 1;
+        background: transparent;
+        color: #647b99;
       }
-      .folderRow.open .treeToggle { background: #d9e9ff; border-color: #a4c4f3; }
-      .folderIcon { width: 17px; height: 17px; flex: 0 0 17px; margin: 0 6px 0 7px; fill: #d9e9ff; stroke: #4675bd; stroke-width: 1.5; }
-      .folderRow.open .folderIcon { fill: #b8d5ff; stroke: #2564bb; }
-      .folderState { flex: 0 0 auto; margin-left: 8px; color: #6680a4; font-size: 11px; font-weight: 600; }
+      .treeToggle:hover { background: #e8f0fb; color: #235caf; }
+      .treeToggle svg { display: block; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; transform: rotate(0deg); }
+      .folderRow.open .treeToggle svg { transform: rotate(90deg); }
+      .folderIcon { width: 17px; height: 17px; flex: 0 0 17px; margin: 0 6px 0 5px; fill: #e7eef8; stroke: #6886ae; stroke-width: 1.5; }
+      .folderRow.open .folderIcon { fill: #dbe9fc; stroke: #3c70b7; }
       .folderPick {
         flex: 1;
         min-width: 0;
@@ -350,13 +352,18 @@
         font-size: 14px;
       }
       .folderPick:hover { color: var(--blue); }
-      .fileRow { padding: 7px 10px 6px; cursor: pointer; }
-      .fileRow.nested { position: relative; background: #f2f7ff; }
-      .fileRow.nested::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(36px + (var(--tree-depth) - 1) * 20px); width: 2px; background: #b9d3f7; }
-      .fileRow:hover, .fileRow.active { background: var(--blue-soft); }
+      .fileRow { padding: 6px 10px 5px; cursor: pointer; background: #fff; transition: background-color .18s ease, box-shadow .18s ease; }
+      .fileRow.nested { position: relative; }
+      .fileRow.nested::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(36px + (var(--tree-depth) - 1) * 20px); width: 1px; background: #e0e7f0; }
+      .fileRow:hover:not(.active) { background: #f5f8fc; }
+      .fileRow.active { background: #dceaff; box-shadow: inset 3px 0 var(--blue); }
       .fileIcon { flex: 0 0 auto; color: #6686b9; font-size: 13px; }
-      .fileRow .fileNameText { color: var(--ink); font-weight: 700; }
-      .fileMeta { margin-top: 3px; color: var(--muted); font-size: 11px; }
+      .fileRow .fileNameText { color: var(--ink); font-weight: 650; }
+      .fileRow.active .fileNameText { color: #174f9f; }
+      .fileMeta { margin-top: 2px; color: var(--muted); font-size: 11px; }
+      @media (prefers-reduced-motion: reduce) {
+        .folderRow, .fileRow { transition: none; }
+      }
       .editorPanel {
         border-right: 0;
         background: #fff;
@@ -651,6 +658,6 @@
       </section>
       <footer id="status" class="status">准备就绪</footer>
     </main>
-    <script src="./app.js?v=15"></script>
+    <script src="./app.js?v=16"></script>
   </body>
 </html>
