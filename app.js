@@ -8528,6 +8528,7 @@ const state = {
   fileSearchTimer: null,
   editorDecorationTimer: null,
   secondaryCursors: [],
+  altDrag: null,
   multiComposing: null,
   editorHistory: { undo: [], redo: [], current: null, restoring: false },
 };
@@ -9516,6 +9517,7 @@ function scheduleEditorDecorations() {
   state.editorDecorationTimer = setTimeout(renderEditorDecorations, 140);
 }
 function clearSecondaryCursors() {
+  state.altDrag = null;
   state.secondaryCursors = [];
   renderSecondaryCursors();
 }
@@ -9552,12 +9554,13 @@ function editorLines(value) {
   cachedEditorLines = starts;
   return starts;
 }
-function positionFromEditorPoint(editor, clientX, clientY) {
-  const metrics = editorMetrics(editor);
+function editorLineFromY(editor, clientY, metrics, starts) {
   const rect = editor.getBoundingClientRect();
-  const starts = editorLines(editor.value);
-  const line = Math.max(0, Math.min(starts.length - 1,
+  return Math.max(0, Math.min(starts.length - 1,
     Math.floor((clientY - rect.top + editor.scrollTop - metrics.top) / metrics.lineHeight)));
+}
+function positionAtEditorLine(editor, line, clientX, metrics, starts) {
+  const rect = editor.getBoundingClientRect();
   const start = starts[line];
   const end = line + 1 < starts.length ? starts[line + 1] - 1 : editor.value.length;
   const target = clientX - rect.left + editor.scrollLeft - metrics.left;
@@ -9572,6 +9575,28 @@ function positionFromEditorPoint(editor, clientX, clientY) {
     position += character.length;
   }
   return end;
+}
+function positionFromEditorPoint(editor, clientX, clientY) {
+  const metrics = editorMetrics(editor);
+  const starts = editorLines(editor.value);
+  const line = editorLineFromY(editor, clientY, metrics, starts);
+  return positionAtEditorLine(editor, line, clientX, metrics, starts);
+}
+function updateAltDrag(drag, clientY) {
+  const editor = $("editor");
+  const metrics = editorMetrics(editor);
+  const starts = editorLines(editor.value);
+  const lastLine = editorLineFromY(editor, clientY, metrics, starts);
+  editor.setSelectionRange(drag.anchorPosition, drag.anchorPosition);
+  state.secondaryCursors = [];
+  const first = Math.min(drag.anchorLine, lastLine);
+  const last = Math.max(drag.anchorLine, lastLine);
+  for (let line = first; line <= last; line++) {
+    if (line === drag.anchorLine) continue;
+    state.secondaryCursors.push(positionAtEditorLine(
+      editor, line, drag.anchorX, metrics, starts));
+  }
+  renderSecondaryCursors();
 }
 function renderSecondaryCursors() {
   const overlay = $("secondaryCursors");
@@ -9841,18 +9866,48 @@ $("editor").addEventListener("input", () => {
 });
 $("editor").addEventListener("mousedown", (event) => {
   if (event.button !== 0) return;
-  if (!event.ctrlKey || event.altKey || event.metaKey) {
+  if (!event.altKey || event.ctrlKey || event.metaKey) {
     clearSecondaryCursors();
     return;
   }
   event.preventDefault();
   const editor = event.currentTarget;
   editor.focus({ preventScroll: true });
-  const position = positionFromEditorPoint(editor, event.clientX, event.clientY);
+  const metrics = editorMetrics(editor);
+  const starts = editorLines(editor.value);
+  state.altDrag = {
+    anchorX: event.clientX,
+    anchorY: event.clientY,
+    anchorLine: editorLineFromY(editor, event.clientY, metrics, starts),
+    anchorPosition: positionFromEditorPoint(editor, event.clientX, event.clientY),
+    active: false,
+  };
+});
+window.addEventListener("mousemove", (event) => {
+  const drag = state.altDrag;
+  if (!drag) return;
+  if (!drag.active && Math.hypot(event.clientX - drag.anchorX,
+    event.clientY - drag.anchorY) < 4) return;
+  drag.active = true;
+  updateAltDrag(drag, event.clientY);
+});
+window.addEventListener("mouseup", (event) => {
+  const drag = state.altDrag;
+  if (!drag || event.button !== 0) return;
+  state.altDrag = null;
+  if (drag.active) {
+    updateAltDrag(drag, event.clientY);
+    setStatus(`${state.secondaryCursors.length + 1} 个光标，可同时输入或粘贴。`);
+    return;
+  }
+  const editor = $("editor");
+  const position = drag.anchorPosition;
   const index = state.secondaryCursors.indexOf(position);
   if (index >= 0) state.secondaryCursors.splice(index, 1);
   else if (position !== editor.selectionStart) state.secondaryCursors.push(position);
   renderSecondaryCursors();
+  if (state.secondaryCursors.length)
+    setStatus(`${state.secondaryCursors.length + 1} 个光标，可同时输入或粘贴。`);
 });
 $("editor").addEventListener("paste", (event) => {
   if (!state.secondaryCursors.length) return;
