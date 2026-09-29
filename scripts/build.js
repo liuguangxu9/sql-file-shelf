@@ -10,7 +10,7 @@ fs.mkdirSync(output, { recursive: true });
 browserify(path.join(source, 'app.js')).bundle((error, buffer) => {
   if (error) throw error;
   fs.writeFileSync(path.join(output, 'app.js'), buffer);
-  for (const file of ['index.html', 'manifest.webmanifest', 'sw.js']) {
+  for (const file of ['index.html', 'favicon.png', 'manifest.webmanifest', 'sw.js']) {
     fs.copyFileSync(path.join(source, file), path.join(output, file));
   }
   console.log('Built static PWA into dist/.');
