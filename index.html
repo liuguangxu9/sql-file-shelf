@@ -164,15 +164,29 @@
       .fileAction:hover {
         color: var(--blue);
       }
-      .directorySelect {
-        width: 100%;
-        margin-top: 8px;
-        padding: 7px 9px;
-        border: 1px solid var(--line);
+      .folderContext {
+        margin-top: 9px;
+        padding: 9px 10px;
+        border: 1px solid #bfd5ff;
         border-radius: 8px;
-        background: #fff;
-        color: var(--ink);
+        background: #edf4ff;
       }
+      .folderContextLabel {
+        color: #3563a8;
+        font-size: 11px;
+        font-weight: 750;
+      }
+      .folderContext strong {
+        display: block;
+        margin: 3px 0 7px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #173f83;
+        font-size: 13px;
+      }
+      .folderContextActions { display: flex; gap: 6px; }
+      .folderContextActions button { padding: 3px 7px; font-size: 11px; }
       .fileDialog {
         width: min(430px, calc(100vw - 32px));
         border: 1px solid var(--line);
@@ -285,56 +299,49 @@
         font-size: 11px;
         margin-top: 2px;
       }
-      .fileTable {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-      }
-      .fileTable th {
-        text-align: left;
+      .fileSortBar {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--line);
         color: var(--muted);
         font-size: 11px;
-        font-weight: 650;
-        padding: 9px 13px;
-        border-bottom: 1px solid var(--line);
-        cursor: pointer;
-        user-select: none;
-        white-space: nowrap;
       }
-      .fileTable th:hover {
-        color: var(--blue);
-        background: var(--soft);
+      .fileSortBar select { flex: 1; min-width: 0; padding: 4px; }
+      .fileSortBar button { padding: 4px 7px; font-size: 11px; }
+      .fileTree { min-width: 0; }
+      .fileTree > div { border-bottom: 1px solid #eef1f5; }
+      .folderRow { padding: 5px 10px; background: #f7faff; cursor: pointer; }
+      .folderRow.selected { background: #dceaff; }
+      .folderRow:hover { background: #e8f1ff; }
+      .treeNameCell { display: flex; align-items: center; min-width: 0; }
+      .treeToggle {
+        flex: 0 0 22px;
+        border: 0;
+        padding: 3px;
+        background: transparent;
+        color: #4770ac;
       }
-      .fileTable th.type { padding-left: 5px; padding-right: 5px; }
-      .fileTable td {
-        padding: 9px 13px;
-        border-bottom: 1px solid #eef1f5;
-        white-space: nowrap;
+      .folderPick {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        padding: 4px 2px;
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
+        background: transparent;
+        color: #244c88;
+        font-weight: 750;
+        text-align: left;
       }
-      .fileTable tr {
-        cursor: pointer;
-      }
-      .fileTable tbody tr:hover,
-      .fileTable tbody tr.active {
-        background: var(--blue-soft);
-      }
-      .fileTable .name {
-        width: 54%;
-        font-weight: 600;
-      }
-      .fileTable .time {
-        width: 29%;
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .fileTable .type {
-        width: 17%;
-        color: #5071ad;
-        font-size: 11px;
-        text-transform: uppercase;
-      }
+      .folderPick:hover { color: var(--blue); }
+      .fileRow { padding: 7px 10px 6px; cursor: pointer; }
+      .fileRow:hover, .fileRow.active { background: var(--blue-soft); }
+      .fileIcon { flex: 0 0 auto; color: #6686b9; font-size: 13px; }
+      .fileRow .fileNameText { color: var(--ink); font-weight: 700; }
+      .fileMeta { margin-top: 3px; color: var(--muted); font-size: 11px; }
       .editorPanel {
         border-right: 0;
         background: #fff;
@@ -537,19 +544,26 @@
               class="search"
               placeholder="筛选当前工作区文件"
             />
-            <select id="directorySelect" class="directorySelect" aria-label="新建文件的目标目录" disabled></select>
+            <div class="folderContext">
+              <div class="folderContextLabel">当前文件夹 · 查询范围与新建位置</div>
+              <strong id="folderScope">尚未选择工作区</strong>
+              <div class="folderContextActions">
+                <button id="folderUp" disabled>上级文件夹</button>
+                <button id="folderAll" disabled>全部文件</button>
+              </div>
+            </div>
+          </div>
+          <div class="fileSortBar">
+            <label for="fileSortKey">排序</label>
+            <select id="fileSortKey" aria-label="文件排序字段">
+              <option value="modified">修改时间</option>
+              <option value="name">文件名</option>
+              <option value="extension">格式</option>
+            </select>
+            <button id="fileSortDirection" aria-label="切换排序方向">降序 ↓</button>
           </div>
           <div class="scroll">
-            <table class="fileTable">
-              <thead>
-                <tr>
-                  <th class="name">文件名</th>
-                  <th class="time">修改时间</th>
-                  <th class="type">格式</th>
-                </tr>
-              </thead>
-              <tbody id="fileList"></tbody>
-            </table>
+            <div id="fileList" class="fileTree"></div>
             <div id="fileEmpty" class="placeholder">
               选择一个已授权工作区后显示文件。
             </div>
@@ -590,6 +604,6 @@
       </section>
       <footer id="status" class="status">准备就绪</footer>
     </main>
-    <script src="./app.js?v=10"></script>
+    <script src="./app.js?v=11"></script>
   </body>
 </html>

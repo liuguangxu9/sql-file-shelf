@@ -8513,6 +8513,8 @@ const state = {
   activeWorkspaceId: null,
   fileCache: new Map(),
   folderCache: new Map(),
+  selectedFolders: new Map(),
+  expandedFolders: new Map(),
   active: null,
   dirty: false,
   globalTimer: null,
@@ -8738,6 +8740,8 @@ async function removeWorkspace(id) {
   state.activeWorkspaceId = result.activeId;
   state.fileCache.delete(id);
   state.folderCache.delete(id);
+  state.selectedFolders.delete(id);
+  state.expandedFolders.delete(id);
   if (state.active?.workspaceId === id) {
     clearEditor();
   }
@@ -8784,7 +8788,7 @@ async function newFile() {
     return setStatus(`“${workspace.name}”尚未获得访问授权。`, true);
   const folder = selectedFolder(workspace);
   const requestedName = prompt(
-    `新建文件（保存到 ${folder.path || "工作区根目录"}）：`,
+    `在「${folder.path || workspace.name}」中新建文件：`,
     "untitled.sql",
   );
   if (requestedName === null) return;
@@ -8811,8 +8815,27 @@ const joinedPath = (folder, name) => (folder ? `${folder}/${name}` : name);
 
 function selectedFolder(workspace) {
   return (state.folderCache.get(workspace.id) || []).find(
-    (folder) => folder.path === $("directorySelect").value,
+    (folder) => folder.path === state.selectedFolders.get(workspace.id),
   ) || { path: "", handle: workspace.handle };
+}
+
+function expandedFolders(workspaceId) {
+  if (!state.expandedFolders.has(workspaceId))
+    state.expandedFolders.set(workspaceId, new Set([""]));
+  return state.expandedFolders.get(workspaceId);
+}
+
+function selectFolderPath(path) {
+  const workspace = current();
+  if (!workspace) return;
+  state.selectedFolders.set(workspace.id, path);
+  expandedFolders(workspace.id).add(path);
+  renderFiles();
+}
+
+function parentFolderPath(path) {
+  const slash = path.lastIndexOf("/");
+  return slash < 0 ? "" : path.slice(0, slash);
 }
 
 async function newFolder() {
@@ -8830,8 +8853,8 @@ async function newFolder() {
   try {
     await parent.handle.getDirectoryHandle(result.name, { create: true });
     await scanWorkspace(workspace);
-    renderDirectorySelect();
-    $("directorySelect").value = path;
+    state.selectedFolders.set(workspace.id, path);
+    expandedFolders(workspace.id).add(path);
     await renderFiles();
     setStatus(`已新建目录 ${path}。`);
   } catch (error) {
@@ -9004,44 +9027,86 @@ async function renderWorkspaces() {
       '<div class="placeholder">点击“新增工作区”，可逐个添加你的分类目录。</div>';
 }
 
-function renderDirectorySelect() {
-  const select = $("directorySelect");
-  const previous = select.value;
-  select.replaceChildren();
-  const workspace = current();
-  for (const folder of state.folderCache.get(workspace?.id) || []) {
-    const option = document.createElement("option");
-    option.value = folder.path;
-    option.textContent = folder.path || "工作区根目录";
-    select.append(option);
-  }
-  select.value = previous;
-  if (select.selectedIndex < 0) select.selectedIndex = 0;
-  select.disabled = !workspace || !select.options.length;
-}
-
 async function renderFiles() {
-  renderDirectorySelect();
   const body = $("fileList");
   body.replaceChildren();
   const workspace = current();
   const all = workspace ? state.fileCache.get(workspace.id) || [] : [];
-  const visible = files.filterFiles(all, $("fileSearch").value, state.fileSort);
-  $("fileCount").textContent = `${visible.length} 个`;
-  $("fileEmpty").hidden = Boolean(visible.length);
-  updateSortHeaders();
-  for (const entry of visible) {
-    const row = document.createElement("tr");
-    if (state.active?.handle === entry.handle) row.className = "active";
+  const folders = workspace ? state.folderCache.get(workspace.id) || [] : [];
+  const selected = workspace ? selectedFolder(workspace) : null;
+  const scope = selected?.path || "";
+  const tree = workspace && folders.length
+    ? files.buildFileTree(folders, all, {
+        scope,
+        query: $("fileSearch").value,
+        sort: state.fileSort,
+        expanded: expandedFolders(workspace.id),
+      })
+    : { rows: [], count: 0 };
+  $("folderScope").textContent = workspace
+    ? `${workspace.name}${scope ? ` / ${scope}` : "（根目录）"}`
+    : "尚未选择工作区";
+  $("folderScope").title = $("folderScope").textContent;
+  $("folderUp").disabled = !workspace || !scope;
+  $("folderAll").disabled = !workspace || !scope;
+  $("newFile").disabled = !workspace || !folders.length;
+  $("newFolder").disabled = !workspace || !folders.length;
+  $("fileCount").textContent = `${tree.count} 个文件`;
+  $("fileEmpty").hidden = Boolean(tree.rows.length && tree.count);
+  $("fileEmpty").textContent = workspace
+    ? "当前范围没有匹配的文件，可选中文件夹后新建。"
+    : "选择一个已授权工作区后显示文件。";
+  $("fileSortKey").value = state.fileSort.key;
+  $("fileSortDirection").textContent = state.fileSort.direction === "asc" ? "升序 ↑" : "降序 ↓";
+  for (const node of tree.rows) {
+    const row = document.createElement("div");
+    if (node.kind === "folder") {
+      row.className = `folderRow${node.path === scope ? " selected" : ""}`;
+      row.title = node.path || workspace.name;
+      const content = document.createElement("div");
+      content.className = "treeNameCell";
+      content.style.paddingLeft = `${node.depth * 16}px`;
+      const arrow = document.createElement("button");
+      arrow.className = "treeToggle";
+      const searching = Boolean($("fileSearch").value.trim());
+      const isOpen = searching || expandedFolders(workspace.id).has(node.path);
+      arrow.textContent = isOpen ? "▾" : "▸";
+      arrow.title = searching ? "搜索时自动展开匹配目录" : isOpen ? "收起文件夹" : "展开文件夹";
+      arrow.disabled = searching;
+      arrow.setAttribute("aria-label", `${arrow.title}：${node.path || workspace.name}`);
+      arrow.addEventListener("click", () => {
+        const expanded = expandedFolders(workspace.id);
+        if (expanded.has(node.path)) expanded.delete(node.path);
+        else expanded.add(node.path);
+        renderFiles();
+      });
+      const pick = document.createElement("button");
+      pick.className = "folderPick";
+      pick.textContent = node.path ? node.path.split("/").pop() : workspace.name;
+      pick.title = `选中 ${node.path || workspace.name}，作为查询范围和新建位置`;
+      pick.addEventListener("click", () => selectFolderPath(node.path));
+      row.addEventListener("click", (event) => {
+        if (event.target !== pick && event.target !== arrow)
+          selectFolderPath(node.path);
+      });
+      content.append(arrow, pick);
+      row.append(content);
+      body.append(row);
+      continue;
+    }
+    const entry = node.entry;
+    row.className = `fileRow${state.active?.handle === entry.handle ? " active" : ""}`;
+    row.title = entry.path;
     row.addEventListener("click", () => openFile(workspace.id, entry));
-    const name = document.createElement("td");
-    name.className = "name";
-    name.title = entry.path;
     const content = document.createElement("div");
     content.className = "fileNameCell";
+    content.style.paddingLeft = `${node.depth * 16 + 22}px`;
+    const icon = document.createElement("span");
+    icon.className = "fileIcon";
+    icon.textContent = "▤";
     const label = document.createElement("span");
     label.className = "fileNameText";
-    label.textContent = entry.path;
+    label.textContent = entry.name;
     const editLocation = document.createElement("button");
     editLocation.className = "fileAction";
     editLocation.title = `重命名或移动 ${entry.path}`;
@@ -9059,37 +9124,14 @@ async function renderFiles() {
       event.stopPropagation();
       deleteFile(entry);
     });
-    content.append(label, editLocation, remove);
-    name.append(content);
-    const time = document.createElement("td");
-    time.className = "time";
-    time.textContent = files.formatFileTime(entry.modified);
-    const type = document.createElement("td");
-    type.className = "type";
-    type.textContent = entry.extension;
-    row.append(name, time, type);
+    content.append(icon, label, editLocation, remove);
+    const meta = document.createElement("div");
+    meta.className = "fileMeta";
+    meta.style.paddingLeft = `${node.depth * 16 + 40}px`;
+    meta.textContent = `${files.formatFileTime(entry.modified)} · ${entry.extension.toUpperCase()}`;
+    row.append(content, meta);
     body.append(row);
   }
-}
-
-function updateSortHeaders() {
-  const labels = { name: "文件名", modified: "修改时间", extension: "格式" };
-  for (const [key, label] of Object.entries(labels)) {
-    const header = document.querySelector(
-      `.fileTable th.${key === "modified" ? "time" : key === "extension" ? "type" : "name"}`,
-    );
-    header.textContent = `${label}${state.fileSort.key === key ? (state.fileSort.direction === "asc" ? " ↑" : " ↓") : " ↕"}`;
-  }
-}
-function sortFiles(key) {
-  state.fileSort = {
-    key,
-    direction:
-      state.fileSort.key === key && state.fileSort.direction === "asc"
-        ? "desc"
-        : "asc",
-  };
-  renderFiles();
 }
 
 async function renderGlobalSearch() {
@@ -9437,19 +9479,23 @@ async function init() {
       : "准备就绪。",
   );
 }
-document
-  .querySelector(".fileTable th.name")
-  .addEventListener("click", () => sortFiles("name"));
-document
-  .querySelector(".fileTable th.time")
-  .addEventListener("click", () => sortFiles("modified"));
-document
-  .querySelector(".fileTable th.type")
-  .addEventListener("click", () => sortFiles("extension"));
+$("fileSortKey").addEventListener("change", (event) => {
+  state.fileSort.key = event.target.value;
+  renderFiles();
+});
+$("fileSortDirection").addEventListener("click", () => {
+  state.fileSort.direction = state.fileSort.direction === "asc" ? "desc" : "asc";
+  renderFiles();
+});
 $("addWorkspace").addEventListener("click", addWorkspace);
 $("refreshFiles").addEventListener("click", refreshCurrentWorkspace);
 $("newFile").addEventListener("click", newFile);
 $("newFolder").addEventListener("click", newFolder);
+$("folderUp").addEventListener("click", () => {
+  const workspace = current();
+  if (workspace) selectFolderPath(parentFolderPath(selectedFolder(workspace).path));
+});
+$("folderAll").addEventListener("click", () => selectFolderPath(""));
 $("fileSearch").addEventListener("input", renderFiles);
 $("globalSearch").addEventListener("input", () => {
   clearTimeout(state.globalTimer);
@@ -9653,6 +9699,71 @@ function formatFileTime(timestamp) {
   }).format(new Date(timestamp));
 }
 
+function buildFileTree(folders, entries, options = {}) {
+  const parentPath = (path) => {
+    const slash = path.lastIndexOf("/");
+    return slash < 0 ? "" : path.slice(0, slash);
+  };
+  const paths = new Set(folders.map((folder) => folder.path));
+  const scope = paths.has(options.scope) ? options.scope : "";
+  const withinScope = (path) =>
+    !scope || path === scope || path.startsWith(`${scope}/`);
+  const scopedFiles = entries.filter((entry) => withinScope(entry.path));
+  const query = String(options.query || "").trim();
+  const matches = filterFiles(scopedFiles, query, options.sort);
+  const included = new Set([scope]);
+  if (query) {
+    const term = query.toLocaleLowerCase();
+    for (const folder of folders) {
+      if (withinScope(folder.path) && folder.path.toLocaleLowerCase().includes(term))
+        included.add(folder.path);
+    }
+    for (const entry of matches) {
+      let parent = parentPath(entry.path);
+      while (withinScope(parent)) {
+        included.add(parent);
+        if (parent === scope) break;
+        parent = parentPath(parent);
+      }
+    }
+    for (const path of [...included]) {
+      let parent = parentPath(path);
+      while (withinScope(parent)) {
+        included.add(parent);
+        if (parent === scope) break;
+        parent = parentPath(parent);
+      }
+    }
+  }
+  const folderChildren = new Map();
+  for (const folder of folders) {
+    if (folder.path === scope || !withinScope(folder.path)) continue;
+    if (query && !included.has(folder.path)) continue;
+    const parent = parentPath(folder.path);
+    if (!folderChildren.has(parent)) folderChildren.set(parent, []);
+    folderChildren.get(parent).push(folder);
+  }
+  for (const children of folderChildren.values())
+    children.sort((a, b) => a.path.localeCompare(b.path, "zh-CN"));
+  const fileChildren = new Map();
+  for (const entry of matches) {
+    const parent = parentPath(entry.path);
+    if (!fileChildren.has(parent)) fileChildren.set(parent, []);
+    fileChildren.get(parent).push(entry);
+  }
+  const expanded = new Set(options.expanded || [""]);
+  const rows = [];
+  function visit(folder, depth) {
+    rows.push({ kind: "folder", path: folder.path, depth, folder });
+    if (!query && !expanded.has(folder.path)) return;
+    for (const child of folderChildren.get(folder.path) || []) visit(child, depth + 1);
+    for (const entry of fileChildren.get(folder.path) || [])
+      rows.push({ kind: "file", path: entry.path, depth: depth + 1, entry });
+  }
+  visit(folders.find((folder) => folder.path === scope) || { path: "" }, 0);
+  return { rows, count: matches.length };
+}
+
 function validateNewFileName(value) {
   const name = String(value || "").trim();
   const filename = name && !name.includes(".") ? `${name}.sql` : name;
@@ -9679,7 +9790,7 @@ function validateFolderName(value) {
   return { valid: true, name };
 }
 
-module.exports = { filterFiles, formatFileTime, validateNewFileName, validateFolderName };
+module.exports = { filterFiles, formatFileTime, buildFileTree, validateNewFileName, validateFolderName };
 
 },{}],44:[function(require,module,exports){
 async function readBytes(handle) {
