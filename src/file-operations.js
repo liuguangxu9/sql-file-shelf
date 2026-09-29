@@ -38,4 +38,10 @@ async function relocateFile(entry, destination, name) {
   return target;
 }
 
-module.exports = { readBytes, sameBytes, writeBytes, findFile, relocateFile };
+async function removeEmptyDirectory(folder, parent, name) {
+  for await (const _ of folder.values())
+    throw new Error("目录不为空，请先移走其中的内容。");
+  await parent.removeEntry(name, { recursive: false });
+}
+
+module.exports = { readBytes, sameBytes, writeBytes, findFile, relocateFile, removeEmptyDirectory };

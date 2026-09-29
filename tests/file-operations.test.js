@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { readBytes, sameBytes, findFile, relocateFile } = require("../src/file-operations");
+const { readBytes, sameBytes, findFile, relocateFile, removeEmptyDirectory } = require("../src/file-operations");
 
 function directory() {
   const entries = new Map();
@@ -68,4 +68,20 @@ test("keeps the source when the copied bytes do not verify", async () => {
   };
   await assert.rejects(relocateFile(entry, destination, "b.sql"), /校验失败/);
   assert.deepEqual([...source.entries.get("a.sql")], [4, 5]);
+});
+
+test("removes an empty directory without a recursive delete", async () => {
+  const calls = [];
+  const folder = { async *values() {} };
+  const parent = { async removeEntry(name, options) { calls.push({ name, options }); } };
+  await removeEmptyDirectory(folder, parent, "empty");
+  assert.deepEqual(calls, [{ name: "empty", options: { recursive: false } }]);
+});
+
+test("keeps a directory when it contains even an unsupported file", async () => {
+  const folder = { async *values() { yield { name: "other.bin" }; } };
+  let removed = false;
+  const parent = { async removeEntry() { removed = true; } };
+  await assert.rejects(removeEmptyDirectory(folder, parent, "filled"), /不为空/);
+  assert.equal(removed, false);
 });

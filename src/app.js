@@ -121,19 +121,23 @@ function clearEditor() {
   renderEditorDecorations();
 }
 
-async function walk(directory, path = "", folders = []) {
+async function walk(directory, path = "", folders = [], folderRecord = null) {
   const result = [];
   const childDirectories = [];
   const childFiles = [];
+  let entryCount = 0;
   for await (const [, handle] of directory.entries()) {
+    entryCount += 1;
     const relative = path ? `${path}/${handle.name}` : handle.name;
     if (handle.kind === "directory") {
-      folders.push({ path: relative, handle });
-      childDirectories.push({ handle, path: relative });
+      const record = { path: relative, handle, empty: false };
+      folders.push(record);
+      childDirectories.push({ handle, path: relative, record });
     }
     if (handle.kind === "file" && ACCEPTED.has(extension(handle.name)))
       childFiles.push({ handle, path: relative });
   }
+  if (folderRecord) folderRecord.empty = entryCount === 0;
   for (let start = 0; start < childFiles.length; start += 16) {
     const batch = childFiles.slice(start, start + 16);
     const entries = await Promise.all(
@@ -152,15 +156,15 @@ async function walk(directory, path = "", folders = []) {
     result.push(...entries);
   }
   for (const child of childDirectories) {
-    result.push(...(await walk(child.handle, child.path, folders)));
+    result.push(...(await walk(child.handle, child.path, folders, child.record)));
   }
   return result;
 }
 
 async function scanWorkspace(workspace) {
   if (!workspace || !(await permission(workspace.handle))) return [];
-  const folders = [{ path: "", handle: workspace.handle }];
-  const result = await walk(workspace.handle, "", folders);
+  const folders = [{ path: "", handle: workspace.handle, empty: false }];
+  const result = await walk(workspace.handle, "", folders, folders[0]);
   state.fileCache.set(workspace.id, result);
   state.folderCache.set(workspace.id, folders);
   return result;
@@ -355,16 +359,45 @@ function expandedFolders(workspaceId) {
   return state.expandedFolders.get(workspaceId);
 }
 
-function selectFolderPath(path) {
+function toggleFolderPath(path) {
   const workspace = current();
   if (!workspace) return;
+  const body = $("fileList");
+  const before = new Map([...body.children].map((row) => [row.dataset.path, row.getBoundingClientRect().top]));
+  const expanded = expandedFolders(workspace.id);
+  const wasOpen = Boolean($("fileSearch").value.trim()) || expanded.has(path);
   state.selectedFolders.set(workspace.id, path);
-  expandedFolders(workspace.id).add(path);
+  if (wasOpen) expanded.delete(path);
+  else expanded.add(path);
   if ($("fileSearch").value) {
     $("fileSearch").value = "";
     clearTimeout(state.fileSearchTimer);
   }
   renderFiles();
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || body.children.length > 160) return;
+  for (const row of body.children) {
+    const previousTop = before.get(row.dataset.path);
+    if (previousTop === undefined) {
+      row.animate(
+        [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "translateY(0)" }],
+        { duration: 170, easing: "cubic-bezier(.2,.7,.25,1)" },
+      );
+    } else {
+      const delta = previousTop - row.getBoundingClientRect().top;
+      if (Math.abs(delta) > 1)
+        row.animate(
+          [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
+          { duration: 190, easing: "cubic-bezier(.2,.7,.25,1)" },
+        );
+    }
+  }
+  body.querySelectorAll(".folderRow").forEach((row) => {
+    if (row.dataset.path !== path) return;
+    row.querySelector(".treeToggle svg")?.animate(
+      [{ transform: `rotate(${wasOpen ? 90 : 0}deg)` }, { transform: `rotate(${wasOpen ? 0 : 90}deg)` }],
+      { duration: 170, easing: "ease-out" },
+    );
+  });
 }
 
 async function newFolder() {
@@ -414,6 +447,30 @@ async function deleteFile(entry) {
     setStatus(`已删除 ${entry.path}。`);
   } catch (error) {
     setStatus(`删除失败：${error.message}`, true);
+  }
+}
+
+async function deleteFolder(folder) {
+  const workspace = current();
+  if (!workspace || !folder?.path || !folder.empty ||
+      !confirm(`确定要永久删除空目录“${folder.path}”吗？此操作无法撤销。`)) return;
+  if (!(await permission(workspace.handle)))
+    return setStatus(`“${workspace.name}”尚未获得访问授权。`, true);
+  const parentPath = folder.path.includes("/")
+    ? folder.path.slice(0, folder.path.lastIndexOf("/"))
+    : "";
+  const parent = (state.folderCache.get(workspace.id) || []).find((item) => item.path === parentPath);
+  if (!parent) return setStatus("父目录已失效，请刷新文件列表。", true);
+  try {
+    await operations.removeEmptyDirectory(folder.handle, parent.handle, folder.handle.name);
+    if (state.selectedFolders.get(workspace.id) === folder.path)
+      state.selectedFolders.set(workspace.id, parentPath);
+    expandedFolders(workspace.id).delete(folder.path);
+    await scanWorkspace(workspace);
+    await renderFiles();
+    setStatus(`已删除空目录 ${folder.path}。`);
+  } catch (error) {
+    setStatus(`删除目录失败：${error.message}`, true);
   }
 }
 
@@ -595,6 +652,7 @@ async function renderFiles() {
   updateSortMenu();
   for (const node of tree.rows) {
     const row = document.createElement("div");
+    row.dataset.path = node.path;
     if (node.kind === "folder") {
       const searching = Boolean($("fileSearch").value.trim());
       const isOpen = searching || expandedFolders(workspace.id).has(node.path);
@@ -605,22 +663,28 @@ async function renderFiles() {
       content.style.paddingLeft = `${node.depth * 20}px`;
       const arrow = document.createElement("button");
       arrow.className = "treeToggle";
-      arrow.textContent = isOpen ? "▾" : "▸";
       arrow.title = searching ? "搜索时自动展开匹配目录" : isOpen ? "收起文件夹" : "展开文件夹";
-      arrow.disabled = searching;
       arrow.setAttribute("aria-label", `${arrow.title}：${node.path || workspace.name}`);
       arrow.setAttribute("aria-expanded", String(isOpen));
-      arrow.addEventListener("click", () => {
-        const expanded = expandedFolders(workspace.id);
-        if (expanded.has(node.path)) expanded.delete(node.path);
-        else expanded.add(node.path);
-        renderFiles();
+      const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      chevron.setAttribute("viewBox", "0 0 18 18");
+      chevron.setAttribute("aria-hidden", "true");
+      const chevronPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      chevronPath.setAttribute("d", "M6.5 4.5 11.5 9l-5 4.5");
+      chevron.append(chevronPath);
+      arrow.append(chevron);
+      arrow.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleFolderPath(node.path);
       });
       const pick = document.createElement("button");
       pick.className = "folderPick";
       pick.textContent = node.path ? node.path.split("/").pop() : workspace.name;
-      pick.title = `选中 ${node.path || workspace.name}，作为新建位置`;
-      pick.addEventListener("click", () => selectFolderPath(node.path));
+      pick.title = `${isOpen ? "收起" : "展开"} ${node.path || workspace.name}，并选为新建位置`;
+      pick.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleFolderPath(node.path);
+      });
       const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       icon.setAttribute("viewBox", "0 0 20 20");
       icon.setAttribute("aria-hidden", "true");
@@ -628,15 +692,20 @@ async function renderFiles() {
       const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
       shape.setAttribute("d", "M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z");
       icon.append(shape);
-      const status = document.createElement("span");
-      status.className = "folderState";
-      status.textContent = isOpen ? "已展开" : "已收起";
-      status.setAttribute("aria-hidden", "true");
-      row.addEventListener("click", (event) => {
-        if (event.target !== pick && event.target !== arrow)
-          selectFolderPath(node.path);
-      });
-      content.append(arrow, icon, pick, status);
+      row.addEventListener("click", () => toggleFolderPath(node.path));
+      content.append(arrow, icon, pick);
+      if (node.folder.empty) {
+        const remove = document.createElement("button");
+        remove.className = "fileDelete folderDelete";
+        remove.title = `删除空目录 ${node.path}`;
+        remove.setAttribute("aria-label", remove.title);
+        remove.textContent = "×";
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteFolder(node.folder);
+        });
+        content.append(remove);
+      }
       row.append(content);
       fragment.append(row);
       continue;
