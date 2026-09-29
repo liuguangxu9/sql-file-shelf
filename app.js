@@ -9251,17 +9251,21 @@ async function renderFiles() {
     const remove = document.createElement("button");
     remove.className = "fileDelete";
     remove.title = `删除 ${entry.path}`;
+    remove.setAttribute("aria-label", remove.title);
     remove.textContent = "×";
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteFile(entry);
     });
-    content.append(icon, label, editLocation, remove);
+    content.append(icon, label);
+    const actions = document.createElement("div");
+    actions.className = "fileRowActions";
+    actions.append(editLocation, remove);
     const meta = document.createElement("div");
     meta.className = "fileMeta";
     meta.style.paddingLeft = `${node.depth * 20 + 40}px`;
     meta.textContent = `${files.formatFileTime(entry.modified)} · ${entry.extension.toUpperCase()}`;
-    row.append(content, meta);
+    row.append(content, meta, actions);
     fragment.append(row);
   }
   body.replaceChildren(fragment);
