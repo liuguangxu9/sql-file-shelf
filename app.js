@@ -8600,6 +8600,13 @@ function updateEditorInfo() {
   $("encodingSelect").value = active.metadata.encoding;
 }
 
+function setFileIdentity(name, path) {
+  $("fileTitle").textContent = name;
+  $("fileTitle").title = name;
+  $("filePath").textContent = path;
+  $("filePath").title = path;
+}
+
 function clearEditor() {
   state.active = null;
   const editor = $("editor");
@@ -8607,8 +8614,7 @@ function clearEditor() {
   editor.disabled = true;
   editor.scrollTop = 0;
   editor.scrollLeft = 0;
-  $("fileTitle").textContent = "尚未打开文件";
-  $("filePath").textContent = "从中间的文件列表选择文件。";
+  setFileIdentity("尚未打开文件", "从中间的文件列表选择文件。");
   markDirty(false);
   updateEditorInfo();
   renderEditorDecorations();
@@ -8786,8 +8792,7 @@ async function openFile(workspaceId, entry) {
     $("editor").disabled = false;
     renderEditorDecorations();
     const workspace = state.workspaces.find((item) => item.id === workspaceId);
-    $("fileTitle").textContent = entry.name;
-    $("filePath").textContent = `${workspace.name} / ${entry.path}`;
+    setFileIdentity(entry.name, `${workspace.name} / ${entry.path}`);
     markDirty(false);
     updateEditorInfo();
     await renderFiles();
@@ -9250,8 +9255,7 @@ async function writeTo(handle, parent, { backup, expectedBytes, name, path, payl
     handle, parent, name, path, extension: extension(name), originalBytes: bytes,
   });
   $("editor").value = text;
-  $("fileTitle").textContent = name;
-  $("filePath").textContent = `${owner.name} / ${path}`;
+  setFileIdentity(name, `${owner.name} / ${path}`);
   markDirty(false);
   await scanWorkspace(owner);
   await renderFiles();
