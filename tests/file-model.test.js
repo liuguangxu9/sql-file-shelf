@@ -5,6 +5,7 @@ const {
   formatFileTime,
   validateNewFileName,
   validateFolderName,
+  buildFileTree,
 } = require("../src/file-model");
 
 const files = [
@@ -78,4 +79,56 @@ test("accepts one folder name but rejects paths and reserved characters", () => 
   assert.deepEqual(validateFolderName("  报表  "), { valid: true, name: "报表" });
   assert.equal(validateFolderName("上级/报表").valid, false);
   assert.equal(validateFolderName("A:B").valid, false);
+});
+
+test("builds one hierarchy with folders before files and preserves empty folders", () => {
+  const rows = buildFileTree(
+    [{ path: "" }, { path: "docs" }, { path: "empty" }, { path: "docs/nested" }, { path: "finance" }],
+    files,
+    { expanded: ["", "docs", "docs/nested"] },
+  ).rows;
+  assert.deepEqual(rows.map(({ kind, path, depth }) => [kind, path, depth]), [
+    ["folder", "", 0],
+    ["folder", "docs", 1],
+    ["folder", "docs/nested", 2],
+    ["file", "docs/notes.md", 2],
+    ["folder", "empty", 1],
+    ["folder", "finance", 1],
+    ["file", "archive.txt", 1],
+  ]);
+});
+
+test("scopes the unified tree to a selected folder and searches within it", () => {
+  const folders = [{ path: "" }, { path: "docs" }, { path: "docs/nested" }, { path: "finance" }];
+  const entries = [
+    ...files,
+    { name: "notes.md", path: "docs/nested/notes.md", extension: "md", modified: 400 },
+  ];
+  const result = buildFileTree(folders, entries, {
+    scope: "docs",
+    query: "notes",
+    expanded: ["docs"],
+  });
+  assert.equal(result.count, 2);
+  assert.deepEqual(result.rows.map(({ path }) => path), [
+    "docs",
+    "docs/nested",
+    "docs/nested/notes.md",
+    "docs/notes.md",
+  ]);
+});
+
+test("collapsed folders keep their files hidden without changing the match count", () => {
+  const result = buildFileTree(
+    [{ path: "" }, { path: "docs" }, { path: "finance" }],
+    files,
+    { expanded: [""] },
+  );
+  assert.equal(result.count, 3);
+  assert.deepEqual(result.rows.map(({ path }) => path), [
+    "",
+    "docs",
+    "finance",
+    "archive.txt",
+  ]);
 });
