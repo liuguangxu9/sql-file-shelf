@@ -2,6 +2,7 @@ const codec = require("./codec");
 const store = require("./workspace-store");
 const files = require("./file-model");
 const operations = require("./file-operations");
+const { escapeHtml, highlightSql } = require("./highlight");
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const MAX_HIGHLIGHT_CHARS = 180000;
 const state = {
@@ -595,19 +596,20 @@ async function renderFiles() {
   for (const node of tree.rows) {
     const row = document.createElement("div");
     if (node.kind === "folder") {
-      row.className = `folderRow${node.path === selected?.path ? " selected" : ""}`;
+      const searching = Boolean($("fileSearch").value.trim());
+      const isOpen = searching || expandedFolders(workspace.id).has(node.path);
+      row.className = `folderRow${isOpen ? " open" : ""}${node.path === selected?.path ? " selected" : ""}`;
       row.title = node.path || workspace.name;
       const content = document.createElement("div");
       content.className = "treeNameCell";
-      content.style.paddingLeft = `${node.depth * 16}px`;
+      content.style.paddingLeft = `${node.depth * 20}px`;
       const arrow = document.createElement("button");
       arrow.className = "treeToggle";
-      const searching = Boolean($("fileSearch").value.trim());
-      const isOpen = searching || expandedFolders(workspace.id).has(node.path);
       arrow.textContent = isOpen ? "▾" : "▸";
       arrow.title = searching ? "搜索时自动展开匹配目录" : isOpen ? "收起文件夹" : "展开文件夹";
       arrow.disabled = searching;
       arrow.setAttribute("aria-label", `${arrow.title}：${node.path || workspace.name}`);
+      arrow.setAttribute("aria-expanded", String(isOpen));
       arrow.addEventListener("click", () => {
         const expanded = expandedFolders(workspace.id);
         if (expanded.has(node.path)) expanded.delete(node.path);
@@ -619,22 +621,34 @@ async function renderFiles() {
       pick.textContent = node.path ? node.path.split("/").pop() : workspace.name;
       pick.title = `选中 ${node.path || workspace.name}，作为新建位置`;
       pick.addEventListener("click", () => selectFolderPath(node.path));
+      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      icon.setAttribute("viewBox", "0 0 20 20");
+      icon.setAttribute("aria-hidden", "true");
+      icon.classList.add("folderIcon");
+      const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      shape.setAttribute("d", "M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z");
+      icon.append(shape);
+      const status = document.createElement("span");
+      status.className = "folderState";
+      status.textContent = isOpen ? "已展开" : "已收起";
+      status.setAttribute("aria-hidden", "true");
       row.addEventListener("click", (event) => {
         if (event.target !== pick && event.target !== arrow)
           selectFolderPath(node.path);
       });
-      content.append(arrow, pick);
+      content.append(arrow, icon, pick, status);
       row.append(content);
       fragment.append(row);
       continue;
     }
     const entry = node.entry;
-    row.className = `fileRow${state.active?.handle === entry.handle ? " active" : ""}`;
+    row.className = `fileRow${node.depth ? " nested" : ""}${state.active?.handle === entry.handle ? " active" : ""}`;
+    row.style.setProperty("--tree-depth", node.depth);
     row.title = entry.path;
     row.addEventListener("click", () => openFile(workspace.id, entry));
     const content = document.createElement("div");
     content.className = "fileNameCell";
-    content.style.paddingLeft = `${node.depth * 16 + 22}px`;
+    content.style.paddingLeft = `${node.depth * 20 + 22}px`;
     const icon = document.createElement("span");
     icon.className = "fileIcon";
     icon.textContent = "▤";
@@ -661,7 +675,7 @@ async function renderFiles() {
     content.append(icon, label, editLocation, remove);
     const meta = document.createElement("div");
     meta.className = "fileMeta";
-    meta.style.paddingLeft = `${node.depth * 16 + 40}px`;
+    meta.style.paddingLeft = `${node.depth * 20 + 40}px`;
     meta.textContent = `${files.formatFileTime(entry.modified)} · ${entry.extension.toUpperCase()}`;
     row.append(content, meta);
     fragment.append(row);
@@ -891,21 +905,6 @@ function changeEncoding() {
   updateEditorInfo();
 }
 
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-function highlightSql(text) {
-  const tokens =
-    /(--[^\r\n]*|\/\*[\s\S]*?\*\/)|('(?:''|[^'])*'|"(?:""|[^"])*")|\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|INSERT|INTO|UPDATE|DELETE|CREATE|ALTER|DROP|TABLE|VIEW|AS|AND|OR|NOT|NULL|IS|IN|LIKE|ORDER|BY|GROUP|HAVING|LIMIT|CASE|WHEN|THEN|ELSE|END|VALUES|SET|DISTINCT|UNION|ALL)\b|\b(\d+(?:\.\d+)?)\b/gi;
-  return text.replace(
-    tokens,
-    (match, comment, string, keyword, number) =>
-      `<span class="${comment ? "sql-comment" : string ? "sql-string" : keyword ? "sql-keyword" : "sql-number"}">${escapeHtml(match)}</span>`,
-  );
-}
 function renderEditorDecorations() {
   clearTimeout(state.editorDecorationTimer);
   const editor = $("editor");
