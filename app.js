@@ -8603,8 +8603,13 @@ function updateEditorInfo() {
 function setFileIdentity(name, path) {
   $("fileTitle").textContent = name;
   $("fileTitle").title = name;
-  $("filePath").textContent = path;
+  const isLocation = path.endsWith(name);
+  const directory = isLocation
+    ? path.slice(0, -name.length).replace(/\s*\/\s*$/, "")
+    : path;
+  $("filePath").textContent = directory;
   $("filePath").title = path;
+  $("filePath").classList.toggle("isLocation", isLocation);
 }
 
 function clearEditor() {
@@ -8682,11 +8687,18 @@ async function refreshCurrentWorkspace() {
 
 async function selectWorkspace(id) {
   if (!state.workspaces.some((item) => item.id === id)) return;
+  if (id === state.activeWorkspaceId) {
+    state.selectedFolders.set(id, "");
+    await renderFiles();
+    setStatus(`已选中 ${current().name} 根目录，新建文件将保存在此。`);
+    return;
+  }
   if (id !== state.activeWorkspaceId) {
     if (state.dirty && !confirm("当前文件尚未保存。放弃修改并切换工作区吗？")) return;
     clearEditor();
   }
   state.activeWorkspaceId = id;
+  state.selectedFolders.set(id, "");
   await persist();
   const workspace = current();
   if (workspace && (await permission(workspace.handle))) {
@@ -9010,6 +9022,7 @@ async function renderWorkspaces() {
     row.className = "workspace";
     const pick = document.createElement("button");
     pick.textContent = `⋮⋮  ${item.name}`;
+    pick.title = `选择工作区根目录：${item.name}`;
     pick.draggable = true;
     if (item.id === state.activeWorkspaceId) pick.className = "active";
     pick.addEventListener("click", () => selectWorkspace(item.id));
@@ -9070,12 +9083,16 @@ async function renderFiles() {
         query: $("fileSearch").value,
         sort: state.fileSort,
         expanded: expandedFolders(workspace.id),
+        hideRoot: true,
       })
     : { rows: [], count: 0 };
   $("newFile").disabled = !workspace || !folders.length;
   $("newFolder").disabled = !workspace || !folders.length;
+  const target = selected?.path || workspace?.name || "当前目录";
+  $("newFile").title = `在「${target}」中新建文件`;
+  $("newFolder").title = `在「${target}」中新建子目录`;
   $("fileCount").textContent = `${tree.count} 个文件`;
-  $("fileEmpty").hidden = Boolean(tree.rows.length && tree.count);
+  $("fileEmpty").hidden = Boolean(tree.rows.length);
   $("fileEmpty").textContent = workspace
     ? "没有匹配的文件，可选中文件夹后新建。"
     : "选择一个已授权工作区后显示文件。";
@@ -9105,7 +9122,7 @@ async function renderFiles() {
       const pick = document.createElement("button");
       pick.className = "folderPick";
       pick.textContent = node.path ? node.path.split("/").pop() : workspace.name;
-      pick.title = `选中 ${node.path || workspace.name}，作为查询范围和新建位置`;
+      pick.title = `选中 ${node.path || workspace.name}，作为新建位置`;
       pick.addEventListener("click", () => selectFolderPath(node.path));
       row.addEventListener("click", (event) => {
         if (event.target !== pick && event.target !== arrow)
@@ -9822,7 +9839,14 @@ function buildFileTree(folders, entries, options = {}) {
     for (const entry of fileChildren.get(folder.path) || [])
       rows.push({ kind: "file", path: entry.path, depth: depth + 1, entry });
   }
-  visit(folders.find((folder) => folder.path === scope) || { path: "" }, 0);
+  const root = folders.find((folder) => folder.path === scope) || { path: "" };
+  if (options.hideRoot && scope === "") {
+    for (const child of folderChildren.get("") || []) visit(child, 0);
+    for (const entry of fileChildren.get("") || [])
+      rows.push({ kind: "file", path: entry.path, depth: 0, entry });
+  } else {
+    visit(root, 0);
+  }
   return { rows, count: matches.length };
 }
 
