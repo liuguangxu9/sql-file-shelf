@@ -164,29 +164,6 @@
       .fileAction:hover {
         color: var(--blue);
       }
-      .folderContext {
-        margin-top: 9px;
-        padding: 9px 10px;
-        border: 1px solid #bfd5ff;
-        border-radius: 8px;
-        background: #edf4ff;
-      }
-      .folderContextLabel {
-        color: #3563a8;
-        font-size: 11px;
-        font-weight: 750;
-      }
-      .folderContext strong {
-        display: block;
-        margin: 3px 0 7px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: #173f83;
-        font-size: 13px;
-      }
-      .folderContextActions { display: flex; gap: 6px; }
-      .folderContextActions button { padding: 3px 7px; font-size: 11px; }
       .fileDialog {
         width: min(430px, calc(100vw - 32px));
         border: 1px solid var(--line);
@@ -299,17 +276,29 @@
         font-size: 11px;
         margin-top: 2px;
       }
-      .fileSortBar {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        padding: 7px 12px;
-        border-bottom: 1px solid var(--line);
-        color: var(--muted);
-        font-size: 11px;
+      .sortControl { position: relative; }
+      .sortMenu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 10;
+        width: 164px;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 12px 32px #17203324;
       }
-      .fileSortBar select { flex: 1; min-width: 0; padding: 4px; }
-      .fileSortBar button { padding: 4px 7px; font-size: 11px; }
+      .sortMenu[hidden] { display: none; }
+      .sortMenu button {
+        display: block;
+        width: 100%;
+        border: 0;
+        padding: 7px 9px;
+        text-align: left;
+      }
+      .sortMenu button:hover, .sortMenu button.selected { background: var(--blue-soft); }
+      .sortMenuDivider { height: 1px; margin: 5px 0; background: var(--line); }
       .fileTree { min-width: 0; }
       .fileTree > div { border-bottom: 1px solid #eef1f5; }
       .folderRow { padding: 5px 10px; background: #f7faff; cursor: pointer; }
@@ -458,6 +447,12 @@
       .editor::selection {
         background: rgba(39, 110, 241, 0.22);
       }
+      .editorShell.editing .editor,
+      .editorShell.plainEditor .editor { color: #192235; }
+      .editorShell.editing .highlight,
+      .editorShell.plainEditor .highlight { visibility: hidden; }
+      .editorShell.plainEditor .lineNumbers { display: none; }
+      .editorShell.plainEditor .editor { padding-left: 26px; }
       .sql-keyword {
         color: #7655d5;
         font-weight: 700;
@@ -524,7 +519,16 @@
             <div class="panelTitle">
               <span>文件</span
               ><span class="panelActions"
-                ><button id="refreshFiles" title="刷新当前工作区文件">
+                ><span class="sortControl">
+                  <button id="fileSortButton" title="排序" aria-expanded="false" aria-controls="fileSortMenu">排序 ▾</button>
+                  <span id="fileSortMenu" class="sortMenu" hidden>
+                    <button data-sort-key="name">文件名</button>
+                    <button data-sort-key="modified">修改时间</button>
+                    <button data-sort-key="extension">格式</button>
+                    <span class="sortMenuDivider"></span>
+                    <button id="fileSortDirection">降序 ↓</button>
+                  </span>
+                </span><button id="refreshFiles" title="刷新当前工作区文件">
                   刷新</button
                 ><button
                   id="newFolder"
@@ -542,25 +546,8 @@
             <input
               id="fileSearch"
               class="search"
-              placeholder="筛选当前工作区文件"
+              placeholder="搜索文件名或文件夹"
             />
-            <div class="folderContext">
-              <div class="folderContextLabel">当前文件夹 · 查询范围与新建位置</div>
-              <strong id="folderScope">尚未选择工作区</strong>
-              <div class="folderContextActions">
-                <button id="folderUp" disabled>上级文件夹</button>
-                <button id="folderAll" disabled>全部文件</button>
-              </div>
-            </div>
-          </div>
-          <div class="fileSortBar">
-            <label for="fileSortKey">排序</label>
-            <select id="fileSortKey" aria-label="文件排序字段">
-              <option value="modified">修改时间</option>
-              <option value="name">文件名</option>
-              <option value="extension">格式</option>
-            </select>
-            <button id="fileSortDirection" aria-label="切换排序方向">降序 ↓</button>
           </div>
           <div class="scroll">
             <div id="fileList" class="fileTree"></div>
@@ -604,6 +591,6 @@
       </section>
       <footer id="status" class="status">准备就绪</footer>
     </main>
-    <script src="./app.js?v=11"></script>
+    <script src="./app.js?v=12"></script>
   </body>
 </html>

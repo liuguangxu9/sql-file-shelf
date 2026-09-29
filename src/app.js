@@ -3,6 +3,7 @@ const store = require("./workspace-store");
 const files = require("./file-model");
 const operations = require("./file-operations");
 const ACCEPTED = new Set(["sql", "txt", "md"]);
+const MAX_HIGHLIGHT_CHARS = 180000;
 const state = {
   workspaces: [],
   activeWorkspaceId: null,
@@ -15,6 +16,9 @@ const state = {
   globalTimer: null,
   fileSort: { key: "modified", direction: "desc" },
   draggingWorkspaceId: null,
+  workspaceRenderVersion: 0,
+  fileSearchTimer: null,
+  editorDecorationTimer: null,
 };
 const $ = (id) => document.getElementById(id);
 const current = () =>
@@ -107,23 +111,36 @@ function clearEditor() {
 
 async function walk(directory, path = "", folders = []) {
   const result = [];
+  const childDirectories = [];
+  const childFiles = [];
   for await (const [, handle] of directory.entries()) {
     const relative = path ? `${path}/${handle.name}` : handle.name;
     if (handle.kind === "directory") {
       folders.push({ path: relative, handle });
-      result.push(...(await walk(handle, relative, folders)));
+      childDirectories.push({ handle, path: relative });
     }
-    if (handle.kind === "file" && ACCEPTED.has(extension(handle.name))) {
-      const file = await handle.getFile();
-      result.push({
-        name: handle.name,
-        path: relative,
-        extension: extension(handle.name),
-        modified: file.lastModified,
-        handle,
-        parent: directory,
-      });
-    }
+    if (handle.kind === "file" && ACCEPTED.has(extension(handle.name)))
+      childFiles.push({ handle, path: relative });
+  }
+  for (let start = 0; start < childFiles.length; start += 16) {
+    const batch = childFiles.slice(start, start + 16);
+    const entries = await Promise.all(
+      batch.map(async ({ handle, path: relative }) => {
+        const file = await handle.getFile();
+        return {
+          name: handle.name,
+          path: relative,
+          extension: extension(handle.name),
+          modified: file.lastModified,
+          handle,
+          parent: directory,
+        };
+      }),
+    );
+    result.push(...entries);
+  }
+  for (const child of childDirectories) {
+    result.push(...(await walk(child.handle, child.path, folders)));
   }
   return result;
 }
@@ -325,12 +342,11 @@ function selectFolderPath(path) {
   if (!workspace) return;
   state.selectedFolders.set(workspace.id, path);
   expandedFolders(workspace.id).add(path);
+  if ($("fileSearch").value) {
+    $("fileSearch").value = "";
+    clearTimeout(state.fileSearchTimer);
+  }
   renderFiles();
-}
-
-function parentFolderPath(path) {
-  const slash = path.lastIndexOf("/");
-  return slash < 0 ? "" : path.slice(0, slash);
 }
 
 async function newFolder() {
@@ -468,12 +484,18 @@ async function editFileLocation(entry) {
 
 async function renderWorkspaces() {
   const list = $("workspaceList");
-  list.replaceChildren();
-  $("workspaceCount").textContent = `${state.workspaces.length} 个`;
-  $("workspaceSummary").textContent = state.workspaces.length
-    ? `已记住 ${state.workspaces.length} 个工作区`
+  const version = ++state.workspaceRenderVersion;
+  const workspaces = [...state.workspaces];
+  const granted = await Promise.all(
+    workspaces.map((item) => permission(item.handle).catch(() => false)),
+  );
+  if (version !== state.workspaceRenderVersion) return;
+  const fragment = document.createDocumentFragment();
+  $("workspaceCount").textContent = `${workspaces.length} 个`;
+  $("workspaceSummary").textContent = workspaces.length
+    ? `已记住 ${workspaces.length} 个工作区`
     : "新增一个本地目录作为工作区";
-  for (const item of state.workspaces) {
+  for (const [index, item] of workspaces.entries()) {
     const row = document.createElement("div");
     row.className = "workspace";
     const pick = document.createElement("button");
@@ -508,55 +530,50 @@ async function renderWorkspaces() {
     remove.title = "移除工作区";
     remove.addEventListener("click", () => removeWorkspace(item.id));
     row.append(pick, remove);
-    list.append(row);
-    if (!(await permission(item.handle))) {
+    fragment.append(row);
+    if (!granted[index]) {
       const grant = document.createElement("button");
       grant.className = "grant";
       grant.textContent = "恢复此目录访问";
       grant.addEventListener("click", () => requestAccess(item.id));
-      list.append(grant);
+      fragment.append(grant);
     }
   }
-  if (!state.workspaces.length)
-    list.innerHTML =
-      '<div class="placeholder">点击“新增工作区”，可逐个添加你的分类目录。</div>';
+  if (!workspaces.length) {
+    const empty = document.createElement("div");
+    empty.className = "placeholder";
+    empty.textContent = "点击“新增工作区”，可逐个添加你的分类目录。";
+    fragment.append(empty);
+  }
+  list.replaceChildren(fragment);
 }
 
 async function renderFiles() {
   const body = $("fileList");
-  body.replaceChildren();
+  const fragment = document.createDocumentFragment();
   const workspace = current();
   const all = workspace ? state.fileCache.get(workspace.id) || [] : [];
   const folders = workspace ? state.folderCache.get(workspace.id) || [] : [];
   const selected = workspace ? selectedFolder(workspace) : null;
-  const scope = selected?.path || "";
   const tree = workspace && folders.length
     ? files.buildFileTree(folders, all, {
-        scope,
         query: $("fileSearch").value,
         sort: state.fileSort,
         expanded: expandedFolders(workspace.id),
       })
     : { rows: [], count: 0 };
-  $("folderScope").textContent = workspace
-    ? `${workspace.name}${scope ? ` / ${scope}` : "（根目录）"}`
-    : "尚未选择工作区";
-  $("folderScope").title = $("folderScope").textContent;
-  $("folderUp").disabled = !workspace || !scope;
-  $("folderAll").disabled = !workspace || !scope;
   $("newFile").disabled = !workspace || !folders.length;
   $("newFolder").disabled = !workspace || !folders.length;
   $("fileCount").textContent = `${tree.count} 个文件`;
   $("fileEmpty").hidden = Boolean(tree.rows.length && tree.count);
   $("fileEmpty").textContent = workspace
-    ? "当前范围没有匹配的文件，可选中文件夹后新建。"
+    ? "没有匹配的文件，可选中文件夹后新建。"
     : "选择一个已授权工作区后显示文件。";
-  $("fileSortKey").value = state.fileSort.key;
-  $("fileSortDirection").textContent = state.fileSort.direction === "asc" ? "升序 ↑" : "降序 ↓";
+  updateSortMenu();
   for (const node of tree.rows) {
     const row = document.createElement("div");
     if (node.kind === "folder") {
-      row.className = `folderRow${node.path === scope ? " selected" : ""}`;
+      row.className = `folderRow${node.path === selected?.path ? " selected" : ""}`;
       row.title = node.path || workspace.name;
       const content = document.createElement("div");
       content.className = "treeNameCell";
@@ -586,7 +603,7 @@ async function renderFiles() {
       });
       content.append(arrow, pick);
       row.append(content);
-      body.append(row);
+      fragment.append(row);
       continue;
     }
     const entry = node.entry;
@@ -625,8 +642,20 @@ async function renderFiles() {
     meta.style.paddingLeft = `${node.depth * 16 + 40}px`;
     meta.textContent = `${files.formatFileTime(entry.modified)} · ${entry.extension.toUpperCase()}`;
     row.append(content, meta);
-    body.append(row);
+    fragment.append(row);
   }
+  body.replaceChildren(fragment);
+}
+
+function updateSortMenu() {
+  const labels = { modified: "修改时间", name: "文件名", extension: "格式" };
+  $("fileSortButton").title = `排序：${labels[state.fileSort.key]}${state.fileSort.direction === "asc" ? "升序" : "降序"}`;
+  $("fileSortDirection").textContent = state.fileSort.direction === "asc" ? "升序 ↑" : "降序 ↓";
+  document.querySelectorAll("[data-sort-key]").forEach((button) => {
+    const selected = button.dataset.sortKey === state.fileSort.key;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
 }
 
 async function renderGlobalSearch() {
@@ -857,14 +886,29 @@ function highlightSql(text) {
   );
 }
 function renderEditorDecorations() {
+  clearTimeout(state.editorDecorationTimer);
   const editor = $("editor");
   const text = editor.value;
+  const shell = editor.parentElement;
+  shell.classList.remove("editing");
+  if (text.length > MAX_HIGHLIGHT_CHARS) {
+    shell.classList.add("plainEditor");
+    $("lineNumbers").textContent = "";
+    $("highlightCode").textContent = "";
+    return;
+  }
+  shell.classList.remove("plainEditor");
   $("lineNumbers").textContent = Array.from(
     { length: Math.max(1, text.split("\n").length) },
     (_, index) => index + 1,
   ).join("\n");
   $("highlightCode").innerHTML =
     state.active?.extension === "sql" ? highlightSql(text) : escapeHtml(text);
+}
+function scheduleEditorDecorations() {
+  $("editor").parentElement.classList.add("editing");
+  clearTimeout(state.editorDecorationTimer);
+  state.editorDecorationTimer = setTimeout(renderEditorDecorations, 140);
 }
 function setupEditorChrome() {
   const editor = $("editor");
@@ -974,31 +1018,45 @@ async function init() {
       : "准备就绪。",
   );
 }
-$("fileSortKey").addEventListener("change", (event) => {
-  state.fileSort.key = event.target.value;
-  renderFiles();
+$("fileSortButton").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const menu = $("fileSortMenu");
+  menu.hidden = !menu.hidden;
+  $("fileSortButton").setAttribute("aria-expanded", String(!menu.hidden));
 });
+document.querySelectorAll("[data-sort-key]").forEach((button) =>
+  button.addEventListener("click", () => {
+    state.fileSort.key = button.dataset.sortKey;
+    $("fileSortMenu").hidden = true;
+    $("fileSortButton").setAttribute("aria-expanded", "false");
+    renderFiles();
+  }),
+);
 $("fileSortDirection").addEventListener("click", () => {
   state.fileSort.direction = state.fileSort.direction === "asc" ? "desc" : "asc";
   renderFiles();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".sortControl")) {
+    $("fileSortMenu").hidden = true;
+    $("fileSortButton").setAttribute("aria-expanded", "false");
+  }
 });
 $("addWorkspace").addEventListener("click", addWorkspace);
 $("refreshFiles").addEventListener("click", refreshCurrentWorkspace);
 $("newFile").addEventListener("click", newFile);
 $("newFolder").addEventListener("click", newFolder);
-$("folderUp").addEventListener("click", () => {
-  const workspace = current();
-  if (workspace) selectFolderPath(parentFolderPath(selectedFolder(workspace).path));
+$("fileSearch").addEventListener("input", () => {
+  clearTimeout(state.fileSearchTimer);
+  state.fileSearchTimer = setTimeout(renderFiles, 120);
 });
-$("folderAll").addEventListener("click", () => selectFolderPath(""));
-$("fileSearch").addEventListener("input", renderFiles);
 $("globalSearch").addEventListener("input", () => {
   clearTimeout(state.globalTimer);
   state.globalTimer = setTimeout(renderGlobalSearch, 250);
 });
 $("editor").addEventListener("input", () => {
   markDirty(true);
-  renderEditorDecorations();
+  scheduleEditorDecorations();
 });
 $("encodingSelect").addEventListener("change", changeEncoding);
 $("save").addEventListener("click", save);
