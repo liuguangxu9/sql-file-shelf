@@ -518,6 +518,24 @@
       .editorShell.plainEditor .highlight { visibility: hidden; }
       .editorShell.plainEditor .lineNumbers { display: none; }
       .editorShell.plainEditor .editor { padding-left: 26px; }
+      .secondaryCursors {
+        position: absolute;
+        z-index: 4;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      .secondaryCursor {
+        position: absolute;
+        width: 2px;
+        background: #1766e8;
+        box-shadow: 0 0 0 1px #fff, 0 0 7px rgba(23, 102, 232, .35);
+        animation: multiCaretBlink 1s steps(1) infinite;
+      }
+      @keyframes multiCaretBlink { 50% { opacity: .15; } }
+      @media (prefers-reduced-motion: reduce) {
+        .secondaryCursor { animation: none; }
+      }
       .sql-keyword {
         color: #7655d5;
         font-weight: 700;
@@ -658,6 +676,6 @@
       </section>
       <footer id="status" class="status">准备就绪</footer>
     </main>
-    <script src="./app.js?v=16"></script>
+    <script src="./app.js?v=17"></script>
   </body>
 </html>
