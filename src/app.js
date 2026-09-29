@@ -2,6 +2,8 @@ const codec = require("./codec");
 const store = require("./workspace-store");
 const files = require("./file-model");
 const operations = require("./file-operations");
+const { editIndent } = require("./editor-indent");
+const { applyMultiEdit } = require("./multi-cursor");
 const { escapeHtml, highlightSql } = require("./highlight");
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const MAX_HIGHLIGHT_CHARS = 180000;
@@ -20,6 +22,9 @@ const state = {
   workspaceRenderVersion: 0,
   fileSearchTimer: null,
   editorDecorationTimer: null,
+  secondaryCursors: [],
+  multiComposing: null,
+  editorHistory: { undo: [], redo: [], current: null, restoring: false },
 };
 const $ = (id) => document.getElementById(id);
 const current = () =>
@@ -110,8 +115,10 @@ function setFileIdentity(name, path) {
 
 function clearEditor() {
   state.active = null;
+  clearSecondaryCursors();
   const editor = $("editor");
   editor.value = "";
+  resetEditorHistory();
   editor.disabled = true;
   editor.scrollTop = 0;
   editor.scrollLeft = 0;
@@ -300,7 +307,9 @@ async function openFile(workspaceId, entry) {
       newline: codec.detectNewline(text),
       originalBytes: bytes,
     };
+    clearSecondaryCursors();
     $("editor").value = text;
+    resetEditorHistory();
     $("editor").disabled = false;
     renderEditorDecorations();
     const workspace = state.workspaces.find((item) => item.id === workspaceId);
@@ -849,7 +858,9 @@ async function writeTo(handle, parent, { backup, expectedBytes, name, path, payl
   Object.assign(state.active, {
     handle, parent, name, path, extension: extension(name), originalBytes: bytes,
   });
+  if ($("editor").value !== text) clearSecondaryCursors();
   $("editor").value = text;
+  state.editorHistory.current = editorSnapshot();
   setFileIdentity(name, `${owner.name} / ${path}`);
   markDirty(false);
   await scanWorkspace(owner);
@@ -999,6 +1010,176 @@ function scheduleEditorDecorations() {
   clearTimeout(state.editorDecorationTimer);
   state.editorDecorationTimer = setTimeout(renderEditorDecorations, 140);
 }
+function clearSecondaryCursors() {
+  state.secondaryCursors = [];
+  renderSecondaryCursors();
+}
+function editorMetrics(editor) {
+  const style = getComputedStyle(editor);
+  const canvas = editorMetrics.canvas || (editorMetrics.canvas = document.createElement("canvas"));
+  const context = canvas.getContext("2d");
+  context.font = `${style.fontSize} ${style.fontFamily}`;
+  return {
+    context,
+    lineHeight: parseFloat(style.lineHeight),
+    left: parseFloat(style.paddingLeft),
+    top: parseFloat(style.paddingTop),
+    tabWidth: context.measureText(" ").width * 2,
+  };
+}
+function textWidth(text, metrics) {
+  let width = 0;
+  for (const character of text) {
+    if (character === "\t")
+      width = (Math.floor(width / metrics.tabWidth) + 1) * metrics.tabWidth;
+    else width += metrics.context.measureText(character).width;
+  }
+  return width;
+}
+let cachedEditorText = null;
+let cachedEditorLines = null;
+function editorLines(value) {
+  if (value === cachedEditorText) return cachedEditorLines;
+  const starts = [0];
+  for (let index = 0; index < value.length; index++)
+    if (value[index] === "\n") starts.push(index + 1);
+  cachedEditorText = value;
+  cachedEditorLines = starts;
+  return starts;
+}
+function positionFromEditorPoint(editor, clientX, clientY) {
+  const metrics = editorMetrics(editor);
+  const rect = editor.getBoundingClientRect();
+  const starts = editorLines(editor.value);
+  const line = Math.max(0, Math.min(starts.length - 1,
+    Math.floor((clientY - rect.top + editor.scrollTop - metrics.top) / metrics.lineHeight)));
+  const start = starts[line];
+  const end = line + 1 < starts.length ? starts[line + 1] - 1 : editor.value.length;
+  const target = clientX - rect.left + editor.scrollLeft - metrics.left;
+  let width = 0;
+  for (let position = start; position < end;) {
+    const character = String.fromCodePoint(editor.value.codePointAt(position));
+    const nextWidth = character === "\t"
+      ? (Math.floor(width / metrics.tabWidth) + 1) * metrics.tabWidth
+      : width + metrics.context.measureText(character).width;
+    if (target < (width + nextWidth) / 2) return position;
+    width = nextWidth;
+    position += character.length;
+  }
+  return end;
+}
+function renderSecondaryCursors() {
+  const overlay = $("secondaryCursors");
+  if (!overlay) return;
+  overlay.replaceChildren();
+  const editor = $("editor");
+  if (!editor || !state.secondaryCursors.length) return;
+  const metrics = editorMetrics(editor);
+  const starts = editorLines(editor.value);
+  for (const position of state.secondaryCursors) {
+    let low = 0;
+    let high = starts.length - 1;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (starts[middle] <= position) low = middle;
+      else high = middle - 1;
+    }
+    const line = low;
+    const before = editor.value.slice(starts[line], position);
+    const cursor = document.createElement("span");
+    cursor.className = "secondaryCursor";
+    cursor.style.left = `${metrics.left + textWidth(before, metrics) - editor.scrollLeft}px`;
+    cursor.style.top = `${metrics.top + line * metrics.lineHeight - editor.scrollTop}px`;
+    cursor.style.height = `${metrics.lineHeight}px`;
+    overlay.append(cursor);
+  }
+}
+function applyMultiAction(action, text = "") {
+  const editor = $("editor");
+  const result = applyMultiEdit(editor.value,
+    [editor.selectionStart, ...state.secondaryCursors], action, text);
+  if (!result) return;
+  editor.value = result.value;
+  editor.setSelectionRange(result.positions[0], result.positions[0]);
+  state.secondaryCursors = [...new Set(result.positions.slice(1))]
+    .filter((position) => position !== result.positions[0]);
+  renderSecondaryCursors();
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function editorSnapshot() {
+  const editor = $("editor");
+  return {
+    value: editor.value,
+    primary: editor.selectionStart,
+    secondary: [...state.secondaryCursors],
+  };
+}
+function resetEditorHistory() {
+  state.editorHistory.undo = [];
+  state.editorHistory.redo = [];
+  state.editorHistory.current = editorSnapshot();
+}
+function rememberEditorInput() {
+  const history = state.editorHistory;
+  const next = editorSnapshot();
+  if (!history.restoring && history.current && history.current.value !== next.value) {
+    history.undo.push(history.current);
+    while (history.undo.length > 30 ||
+      history.undo.reduce((size, item) => size + item.value.length, 0) > 6000000)
+      history.undo.shift();
+    history.redo = [];
+  }
+  history.current = next;
+}
+function restoreEditorHistory(redo = false) {
+  const history = state.editorHistory;
+  const source = redo ? history.redo : history.undo;
+  const target = redo ? history.undo : history.redo;
+  if (!source.length) return;
+  target.push(editorSnapshot());
+  const snapshot = source.pop();
+  const editor = $("editor");
+  history.restoring = true;
+  editor.value = snapshot.value;
+  editor.setSelectionRange(snapshot.primary, snapshot.primary);
+  state.secondaryCursors = snapshot.secondary;
+  renderSecondaryCursors();
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+  history.restoring = false;
+  history.current = editorSnapshot();
+}
+function moveCursor(value, position, key) {
+  const start = value.lastIndexOf("\n", position - 1) + 1;
+  const next = value.indexOf("\n", position);
+  const end = next < 0 ? value.length : next;
+  if (key === "Home") return start;
+  if (key === "End") return end;
+  if (key === "ArrowLeft") {
+    if (!position) return 0;
+    const code = value.charCodeAt(position - 1);
+    return position - (code >= 0xdc00 && code <= 0xdfff ? 2 : 1);
+  }
+  if (key === "ArrowRight") {
+    if (position >= value.length) return value.length;
+    const code = value.charCodeAt(position);
+    return position + (code >= 0xd800 && code <= 0xdbff ? 2 : 1);
+  }
+  const column = position - start;
+  if (key === "ArrowUp") {
+    if (!start) return position;
+    const previousEnd = start - 1;
+    const previousStart = value.lastIndexOf("\n", previousEnd - 1) + 1;
+    return Math.min(previousStart + column, previousEnd);
+  }
+  if (key === "ArrowDown") {
+    if (next < 0) return position;
+    const followingStart = next + 1;
+    const followingEnd = value.indexOf("\n", followingStart);
+    return Math.min(followingStart + column,
+      followingEnd < 0 ? value.length : followingEnd);
+  }
+  return position;
+}
 function setupEditorChrome() {
   const editor = $("editor");
   const shell = document.createElement("div");
@@ -1012,13 +1193,18 @@ function setupEditorChrome() {
   const code = document.createElement("code");
   code.id = "highlightCode";
   highlight.append(code);
+  const cursors = document.createElement("div");
+  cursors.id = "secondaryCursors";
+  cursors.className = "secondaryCursors";
   editor.parentElement.insertBefore(shell, editor);
-  shell.append(lines, highlight, editor);
+  shell.append(lines, highlight, editor, cursors);
   editor.addEventListener("scroll", () => {
     highlight.scrollTop = editor.scrollTop;
     highlight.scrollLeft = editor.scrollLeft;
     lines.scrollTop = editor.scrollTop;
+    renderSecondaryCursors();
   });
+  new ResizeObserver(renderSecondaryCursors).observe(editor);
   renderEditorDecorations();
 }
 function setupResizers() {
@@ -1144,8 +1330,114 @@ $("globalSearch").addEventListener("input", () => {
   state.globalTimer = setTimeout(renderGlobalSearch, 250);
 });
 $("editor").addEventListener("input", () => {
+  rememberEditorInput();
   markDirty(true);
   scheduleEditorDecorations();
+});
+$("editor").addEventListener("mousedown", (event) => {
+  if (event.button !== 0) return;
+  if (!event.ctrlKey || event.altKey || event.metaKey) {
+    clearSecondaryCursors();
+    return;
+  }
+  event.preventDefault();
+  const editor = event.currentTarget;
+  editor.focus({ preventScroll: true });
+  const position = positionFromEditorPoint(editor, event.clientX, event.clientY);
+  const index = state.secondaryCursors.indexOf(position);
+  if (index >= 0) state.secondaryCursors.splice(index, 1);
+  else if (position !== editor.selectionStart) state.secondaryCursors.push(position);
+  renderSecondaryCursors();
+});
+$("editor").addEventListener("paste", (event) => {
+  if (!state.secondaryCursors.length) return;
+  event.preventDefault();
+  applyMultiAction("insert", event.clipboardData.getData("text/plain"));
+});
+$("editor").addEventListener("beforeinput", (event) => {
+  if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
+    event.preventDefault();
+    restoreEditorHistory(event.inputType === "historyRedo");
+    return;
+  }
+  if (!state.secondaryCursors.length || event.isComposing || state.multiComposing ||
+    event.inputType !== "insertText" || !event.data) return;
+  event.preventDefault();
+  applyMultiAction("insert", event.data);
+});
+$("editor").addEventListener("compositionstart", (event) => {
+  if (!state.secondaryCursors.length) return;
+  const editor = event.currentTarget;
+  state.multiComposing = {
+    value: editor.value,
+    positions: [editor.selectionStart, ...state.secondaryCursors],
+  };
+});
+$("editor").addEventListener("compositionend", (event) => {
+  const original = state.multiComposing;
+  state.multiComposing = null;
+  if (!original) return;
+  const editor = event.currentTarget;
+  let prefix = 0;
+  while (prefix < original.value.length && prefix < editor.value.length &&
+    original.value[prefix] === editor.value[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < original.value.length - prefix && suffix < editor.value.length - prefix &&
+    original.value[original.value.length - suffix - 1] ===
+      editor.value[editor.value.length - suffix - 1]) suffix++;
+  const inserted = editor.value.slice(prefix, editor.value.length - suffix);
+  const result = applyMultiEdit(original.value, original.positions, "insert", inserted);
+  if (!result) return;
+  editor.value = result.value;
+  editor.setSelectionRange(result.positions[0], result.positions[0]);
+  state.secondaryCursors = result.positions.slice(1);
+  renderSecondaryCursors();
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+});
+$("editor").addEventListener("keydown", (event) => {
+  const editor = event.currentTarget;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey &&
+    (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+    event.preventDefault();
+    restoreEditorHistory(event.key.toLowerCase() === "y" || event.shiftKey);
+    return;
+  }
+  if (event.key === "Escape" && state.secondaryCursors.length) {
+    event.preventDefault();
+    clearSecondaryCursors();
+    return;
+  }
+  if (state.secondaryCursors.length && !event.isComposing) {
+    if (event.ctrlKey || event.altKey || event.metaKey) return;
+    const actions = { Backspace: "backspace", Delete: "delete" };
+    if (event.key === "Tab" || event.key === "Enter" || actions[event.key] ||
+      event.key.length === 1) {
+      event.preventDefault();
+      applyMultiAction(event.key === "Tab" && event.shiftKey ? "outdent" :
+        actions[event.key] || "insert",
+      event.key === "Tab" ? "\t" : event.key === "Enter" ? "\n" : event.key);
+      return;
+    }
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      if (event.shiftKey) { clearSecondaryCursors(); return; }
+      event.preventDefault();
+      const positions = [editor.selectionStart, ...state.secondaryCursors]
+        .map((position) => moveCursor(editor.value, position, event.key));
+      editor.setSelectionRange(positions[0], positions[0]);
+      state.secondaryCursors = [...new Set(positions.slice(1))]
+        .filter((position) => position !== positions[0]);
+      renderSecondaryCursors();
+      return;
+    }
+  }
+  if (event.key !== "Tab" || event.ctrlKey || event.altKey || event.metaKey) return;
+  event.preventDefault();
+  const change = editIndent(editor.value, editor.selectionStart, editor.selectionEnd, event.shiftKey);
+  if (!change) return;
+  const direction = editor.selectionDirection;
+  editor.setRangeText(change.replacement, change.replaceStart, change.replaceEnd, "preserve");
+  editor.setSelectionRange(change.selectionStart, change.selectionEnd, direction);
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
 });
 $("encodingSelect").addEventListener("change", changeEncoding);
 $("save").addEventListener("click", save);
