@@ -6,6 +6,7 @@ const operations = require("./file-operations");
 const { editIndent } = require("./editor-indent");
 const { applyMultiEdit } = require("./multi-cursor");
 const { escapeHtml, highlightSql } = require("./highlight");
+const { lineStarts, editorWindow } = require("./editor-window");
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const MAX_HIGHLIGHT_CHARS = 180000;
 const state = {
@@ -23,6 +24,7 @@ const state = {
   workspaceRenderVersion: 0,
   fileSearchTimer: null,
   editorDecorationTimer: null,
+  editorWindowCache: null,
   fileOpenVersion: 0,
   secondaryCursors: [],
   altDrag: null,
@@ -306,6 +308,7 @@ async function openFile(workspaceId, entry) {
       state.active.path === entry.path) return true;
     version = ++state.fileOpenVersion;
     setStatus(`正在打开 ${entry.name}…`);
+    updateFileSelection(entry.path, workspaceId);
     const bytes = await operations.readBytes(entry.handle);
     if (version !== state.fileOpenVersion) return false;
     const { metadata, text, newline } = await decodeAsync(bytes);
@@ -319,9 +322,11 @@ async function openFile(workspaceId, entry) {
     };
     clearSecondaryCursors();
     $("editor").value = text;
+    $("editor").scrollTop = 0;
+    $("editor").scrollLeft = 0;
     resetEditorHistory();
     $("editor").disabled = false;
-    scheduleEditorDecorations();
+    renderEditorDecorations();
     const workspace = state.workspaces.find((item) => item.id === workspaceId);
     setFileIdentity(entry.name, `${workspace.name} / ${entry.path}`);
     markDirty(false);
@@ -331,15 +336,16 @@ async function openFile(workspaceId, entry) {
     return true;
   } catch (error) {
     if (version !== undefined && version !== state.fileOpenVersion) return false;
+    updateFileSelection();
     setStatus(`无法打开文件：${error.message}`, true);
     return false;
   }
 }
 
-function updateFileSelection() {
+function updateFileSelection(path = state.active?.path, workspaceId = state.active?.workspaceId) {
   for (const row of $("fileList").querySelectorAll(".fileRow")) {
-    row.classList.toggle("active", state.active?.workspaceId === state.activeWorkspaceId &&
-      row.dataset.path === state.active?.path);
+    row.classList.toggle("active", workspaceId === state.activeWorkspaceId &&
+      row.dataset.path === path);
   }
 }
 
@@ -1016,17 +1022,37 @@ function renderEditorDecorations() {
   shell.classList.remove("editing");
   if (text.length > MAX_HIGHLIGHT_CHARS) {
     shell.classList.add("plainEditor");
-    $("lineNumbers").textContent = "";
+    $("lineNumberContent").textContent = "";
     $("highlightCode").textContent = "";
+    state.editorWindowCache = null;
     return;
   }
   shell.classList.remove("plainEditor");
-  $("lineNumbers").textContent = Array.from(
-    { length: Math.max(1, text.split("\n").length) },
-    (_, index) => index + 1,
-  ).join("\n");
-  $("highlightCode").innerHTML =
-    state.active?.extension === "sql" ? highlightSql(text) : escapeHtml(text);
+  renderEditorWindow(true);
+}
+function renderEditorWindow(force = false) {
+  const editor = $("editor");
+  if (editor.parentElement.classList.contains("plainEditor") ||
+    editor.parentElement.classList.contains("editing")) return;
+  const text = editor.value;
+  let cache = state.editorWindowCache;
+  if (!cache || cache.text !== text) {
+    cache = state.editorWindowCache = { text, starts: lineStarts(text) };
+  }
+  const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
+  const view = editorWindow(cache.starts, text.length, editor.scrollTop, editor.clientHeight, lineHeight);
+  const code = $("highlightCode");
+  const numbers = $("lineNumberContent");
+  if (force || cache.first !== view.first || cache.last !== view.last) {
+    code.innerHTML = state.active?.extension === "sql"
+      ? highlightSql(text, view) : escapeHtml(text.slice(view.start, view.end));
+    numbers.textContent = Array.from({ length: view.last - view.first }, (_, i) => view.first + i + 1).join("\n");
+    cache.first = view.first;
+    cache.last = view.last;
+  }
+  const y = view.first * lineHeight - editor.scrollTop;
+  code.style.transform = `translate(${-editor.scrollLeft}px, ${y}px)`;
+  numbers.style.transform = `translateY(${y}px)`;
 }
 function scheduleEditorDecorations() {
   $("editor").parentElement.classList.add("editing");
@@ -1234,6 +1260,9 @@ function setupEditorChrome() {
   const lines = document.createElement("pre");
   lines.id = "lineNumbers";
   lines.className = "lineNumbers";
+  const numberContent = document.createElement("div");
+  numberContent.id = "lineNumberContent";
+  lines.append(numberContent);
   const highlight = document.createElement("pre");
   highlight.id = "highlight";
   highlight.className = "highlight";
@@ -1246,12 +1275,13 @@ function setupEditorChrome() {
   editor.parentElement.insertBefore(shell, editor);
   shell.append(lines, highlight, editor, cursors);
   editor.addEventListener("scroll", () => {
-    highlight.scrollTop = editor.scrollTop;
-    highlight.scrollLeft = editor.scrollLeft;
-    lines.scrollTop = editor.scrollTop;
+    renderEditorWindow();
     renderSecondaryCursors();
   });
-  new ResizeObserver(renderSecondaryCursors).observe(editor);
+  new ResizeObserver(() => {
+    renderEditorWindow();
+    renderSecondaryCursors();
+  }).observe(editor);
   renderEditorDecorations();
 }
 function setupResizers() {
@@ -1378,6 +1408,7 @@ $("globalSearch").addEventListener("input", () => {
 });
 $("editor").addEventListener("input", () => {
   state.fileOpenVersion += 1;
+  updateFileSelection();
   rememberEditorInput();
   markDirty(true);
   scheduleEditorDecorations();

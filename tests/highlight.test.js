@@ -2,6 +2,21 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { escapeHtml, highlightSql } = require("../src/highlight");
 
+test("highlights only requested text while keeping multiline comment context", () => {
+  const text = "SELECT 1\n/* comment\nSELECT <&\n*/\nSELECT 2";
+  const start = text.indexOf("SELECT <&");
+  const end = text.indexOf("\n*/");
+  assert.equal(highlightSql(text, { start, end }), '<span class="sql-comment">SELECT &lt;&amp;</span>');
+});
+
+test("viewport preserves multiline string context and exact slice", () => {
+  const text = "SELECT 'a\nFROM <&\nb' FROM t";
+  const start = text.indexOf("FROM <&");
+  const end = text.indexOf("\nb'");
+  assert.equal(highlightSql(text, { start, end }), '<span class="sql-string">FROM &lt;&amp;</span>');
+  assert.equal(highlightSql("a <& b", { start: 2, end: 4 }), "&lt;&amp;");
+});
+
 test("unterminated comments and strings remain one escaped token", () => {
   assert.equal(highlightSql("/* unfinished <& SELECT"), '<span class="sql-comment">/* unfinished &lt;&amp; SELECT</span>');
   assert.equal(highlightSql("'unfinished <& SELECT"), '<span class="sql-string">\'unfinished &lt;&amp; SELECT</span>');

@@ -3,13 +3,13 @@ let worker;
 let sequence = 0;
 const pending = new Map();
 function decodeAsync(bytes) {
-  if (typeof Worker === "undefined") {
+  if (bytes.length <= 256 * 1024 || typeof Worker === "undefined") {
     const metadata = codec.detectEncoding(bytes);
     const text = codec.decodeFileBytes(bytes, metadata);
     return Promise.resolve({ metadata, text, newline: codec.detectNewline(text) });
   }
   if (!worker) {
-    worker = new Worker("./codec-worker.js?v=21");
+    worker = new Worker("./codec-worker.js?v=22");
     worker.onmessage = ({ data }) => {
       const task = pending.get(data.id);
       if (!task) return;
