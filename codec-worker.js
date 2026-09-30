@@ -8560,7 +8560,11 @@ function normalizeEncoding(label) {
 }
 
 function cjkCount(text) {
-  return Array.from(text).filter((char) => char >= '\u4e00' && char <= '\u9fff').length;
+  let count = 0;
+  for (const char of text) {
+    if (char >= '\u4e00' && char <= '\u9fff' && ++count === 2) break;
+  }
+  return count;
 }
 
 function detectEncoding(raw) {
@@ -8576,15 +8580,15 @@ function detectEncoding(raw) {
     return { encoding: 'utf-8', bom: null, confidence: 1, source: 'strict-utf8' };
   }
 
-  const result = chardet.detect(bytes, {
-    detectEncodings: ['GB18030', 'GB2312', 'windows-1252', 'windows-1251', 'Shift_JIS'],
-  }) || {};
   // GBK and Windows-1252 are both permissive decoders. For Chinese SQL files,
   // recognizable CJK text is stronger evidence than a single-byte fallback.
   const gbkText = iconv.decode(bytes, 'gbk');
   if (cjkCount(gbkText) >= 2) {
-    return { encoding: 'gbk', bom: null, confidence: Math.max(Number(result.confidence || 0), 0.8), source: 'cjk-heuristic' };
+    return { encoding: 'gbk', bom: null, confidence: 0.8, source: 'cjk-heuristic' };
   }
+  const result = chardet.detect(bytes, {
+    detectEncodings: ['GB18030', 'GB2312', 'windows-1252', 'windows-1251', 'Shift_JIS'],
+  }) || {};
   const encoding = normalizeEncoding(result.encoding) || 'windows-1252';
   return {
     encoding,

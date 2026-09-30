@@ -8511,6 +8511,7 @@ const operations = require("./file-operations");
 const { editIndent } = require("./editor-indent");
 const { applyMultiEdit } = require("./multi-cursor");
 const { escapeHtml, highlightSql } = require("./highlight");
+const { lineStarts, editorWindow } = require("./editor-window");
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const MAX_HIGHLIGHT_CHARS = 180000;
 const state = {
@@ -8528,6 +8529,7 @@ const state = {
   workspaceRenderVersion: 0,
   fileSearchTimer: null,
   editorDecorationTimer: null,
+  editorWindowCache: null,
   fileOpenVersion: 0,
   secondaryCursors: [],
   altDrag: null,
@@ -8811,6 +8813,7 @@ async function openFile(workspaceId, entry) {
       state.active.path === entry.path) return true;
     version = ++state.fileOpenVersion;
     setStatus(`正在打开 ${entry.name}…`);
+    updateFileSelection(entry.path, workspaceId);
     const bytes = await operations.readBytes(entry.handle);
     if (version !== state.fileOpenVersion) return false;
     const { metadata, text, newline } = await decodeAsync(bytes);
@@ -8824,9 +8827,11 @@ async function openFile(workspaceId, entry) {
     };
     clearSecondaryCursors();
     $("editor").value = text;
+    $("editor").scrollTop = 0;
+    $("editor").scrollLeft = 0;
     resetEditorHistory();
     $("editor").disabled = false;
-    scheduleEditorDecorations();
+    renderEditorDecorations();
     const workspace = state.workspaces.find((item) => item.id === workspaceId);
     setFileIdentity(entry.name, `${workspace.name} / ${entry.path}`);
     markDirty(false);
@@ -8836,15 +8841,16 @@ async function openFile(workspaceId, entry) {
     return true;
   } catch (error) {
     if (version !== undefined && version !== state.fileOpenVersion) return false;
+    updateFileSelection();
     setStatus(`无法打开文件：${error.message}`, true);
     return false;
   }
 }
 
-function updateFileSelection() {
+function updateFileSelection(path = state.active?.path, workspaceId = state.active?.workspaceId) {
   for (const row of $("fileList").querySelectorAll(".fileRow")) {
-    row.classList.toggle("active", state.active?.workspaceId === state.activeWorkspaceId &&
-      row.dataset.path === state.active?.path);
+    row.classList.toggle("active", workspaceId === state.activeWorkspaceId &&
+      row.dataset.path === path);
   }
 }
 
@@ -9521,17 +9527,37 @@ function renderEditorDecorations() {
   shell.classList.remove("editing");
   if (text.length > MAX_HIGHLIGHT_CHARS) {
     shell.classList.add("plainEditor");
-    $("lineNumbers").textContent = "";
+    $("lineNumberContent").textContent = "";
     $("highlightCode").textContent = "";
+    state.editorWindowCache = null;
     return;
   }
   shell.classList.remove("plainEditor");
-  $("lineNumbers").textContent = Array.from(
-    { length: Math.max(1, text.split("\n").length) },
-    (_, index) => index + 1,
-  ).join("\n");
-  $("highlightCode").innerHTML =
-    state.active?.extension === "sql" ? highlightSql(text) : escapeHtml(text);
+  renderEditorWindow(true);
+}
+function renderEditorWindow(force = false) {
+  const editor = $("editor");
+  if (editor.parentElement.classList.contains("plainEditor") ||
+    editor.parentElement.classList.contains("editing")) return;
+  const text = editor.value;
+  let cache = state.editorWindowCache;
+  if (!cache || cache.text !== text) {
+    cache = state.editorWindowCache = { text, starts: lineStarts(text) };
+  }
+  const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
+  const view = editorWindow(cache.starts, text.length, editor.scrollTop, editor.clientHeight, lineHeight);
+  const code = $("highlightCode");
+  const numbers = $("lineNumberContent");
+  if (force || cache.first !== view.first || cache.last !== view.last) {
+    code.innerHTML = state.active?.extension === "sql"
+      ? highlightSql(text, view) : escapeHtml(text.slice(view.start, view.end));
+    numbers.textContent = Array.from({ length: view.last - view.first }, (_, i) => view.first + i + 1).join("\n");
+    cache.first = view.first;
+    cache.last = view.last;
+  }
+  const y = view.first * lineHeight - editor.scrollTop;
+  code.style.transform = `translate(${-editor.scrollLeft}px, ${y}px)`;
+  numbers.style.transform = `translateY(${y}px)`;
 }
 function scheduleEditorDecorations() {
   $("editor").parentElement.classList.add("editing");
@@ -9739,6 +9765,9 @@ function setupEditorChrome() {
   const lines = document.createElement("pre");
   lines.id = "lineNumbers";
   lines.className = "lineNumbers";
+  const numberContent = document.createElement("div");
+  numberContent.id = "lineNumberContent";
+  lines.append(numberContent);
   const highlight = document.createElement("pre");
   highlight.id = "highlight";
   highlight.className = "highlight";
@@ -9751,12 +9780,13 @@ function setupEditorChrome() {
   editor.parentElement.insertBefore(shell, editor);
   shell.append(lines, highlight, editor, cursors);
   editor.addEventListener("scroll", () => {
-    highlight.scrollTop = editor.scrollTop;
-    highlight.scrollLeft = editor.scrollLeft;
-    lines.scrollTop = editor.scrollTop;
+    renderEditorWindow();
     renderSecondaryCursors();
   });
-  new ResizeObserver(renderSecondaryCursors).observe(editor);
+  new ResizeObserver(() => {
+    renderEditorWindow();
+    renderSecondaryCursors();
+  }).observe(editor);
   renderEditorDecorations();
 }
 function setupResizers() {
@@ -9883,6 +9913,7 @@ $("globalSearch").addEventListener("input", () => {
 });
 $("editor").addEventListener("input", () => {
   state.fileOpenVersion += 1;
+  updateFileSelection();
   rememberEditorInput();
   markDirty(true);
   scheduleEditorDecorations();
@@ -10041,19 +10072,19 @@ if ("serviceWorker" in navigator)
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 init();
 
-},{"./async-codec":42,"./codec":43,"./editor-indent":44,"./file-model":45,"./file-operations":46,"./highlight":47,"./multi-cursor":48,"./workspace-store":49}],42:[function(require,module,exports){
+},{"./async-codec":42,"./codec":43,"./editor-indent":44,"./editor-window":45,"./file-model":46,"./file-operations":47,"./highlight":48,"./multi-cursor":49,"./workspace-store":50}],42:[function(require,module,exports){
 const codec = require("./codec");
 let worker;
 let sequence = 0;
 const pending = new Map();
 function decodeAsync(bytes) {
-  if (typeof Worker === "undefined") {
+  if (bytes.length <= 256 * 1024 || typeof Worker === "undefined") {
     const metadata = codec.detectEncoding(bytes);
     const text = codec.decodeFileBytes(bytes, metadata);
     return Promise.resolve({ metadata, text, newline: codec.detectNewline(text) });
   }
   if (!worker) {
-    worker = new Worker("./codec-worker.js?v=21");
+    worker = new Worker("./codec-worker.js?v=22");
     worker.onmessage = ({ data }) => {
       const task = pending.get(data.id);
       if (!task) return;
@@ -10123,7 +10154,11 @@ function normalizeEncoding(label) {
 }
 
 function cjkCount(text) {
-  return Array.from(text).filter((char) => char >= '\u4e00' && char <= '\u9fff').length;
+  let count = 0;
+  for (const char of text) {
+    if (char >= '\u4e00' && char <= '\u9fff' && ++count === 2) break;
+  }
+  return count;
 }
 
 function detectEncoding(raw) {
@@ -10139,15 +10174,15 @@ function detectEncoding(raw) {
     return { encoding: 'utf-8', bom: null, confidence: 1, source: 'strict-utf8' };
   }
 
-  const result = chardet.detect(bytes, {
-    detectEncodings: ['GB18030', 'GB2312', 'windows-1252', 'windows-1251', 'Shift_JIS'],
-  }) || {};
   // GBK and Windows-1252 are both permissive decoders. For Chinese SQL files,
   // recognizable CJK text is stronger evidence than a single-byte fallback.
   const gbkText = iconv.decode(bytes, 'gbk');
   if (cjkCount(gbkText) >= 2) {
-    return { encoding: 'gbk', bom: null, confidence: Math.max(Number(result.confidence || 0), 0.8), source: 'cjk-heuristic' };
+    return { encoding: 'gbk', bom: null, confidence: 0.8, source: 'cjk-heuristic' };
   }
+  const result = chardet.detect(bytes, {
+    detectEncodings: ['GB18030', 'GB2312', 'windows-1252', 'windows-1251', 'Shift_JIS'],
+  }) || {};
   const encoding = normalizeEncoding(result.encoding) || 'windows-1252';
   return {
     encoding,
@@ -10251,6 +10286,20 @@ function editIndent(value, start, end, outdent = false) {
 module.exports = { editIndent };
 
 },{}],45:[function(require,module,exports){
+function lineStarts(text) {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) if (text[i] === "\n") starts.push(i + 1);
+  return starts;
+}
+function editorWindow(starts, length, scrollTop, height, lineHeight) {
+  const visible = Math.min(starts.length - 1, Math.max(0, Math.floor((scrollTop - 22) / lineHeight)));
+  const first = Math.max(0, visible - 12);
+  const last = Math.min(starts.length, visible + Math.ceil(height / lineHeight) + 13);
+  return { first, last, start: starts[first], end: starts[last] ?? length };
+}
+module.exports = { lineStarts, editorWindow };
+
+},{}],46:[function(require,module,exports){
 function filterFiles(
   files,
   query,
@@ -10395,7 +10444,7 @@ function validateFolderName(value) {
 
 module.exports = { filterFiles, formatFileTime, buildFileTree, validateNewFileName, validateFolderName };
 
-},{}],46:[function(require,module,exports){
+},{}],47:[function(require,module,exports){
 async function readBytes(handle) {
   return new Uint8Array(await (await handle.getFile()).arrayBuffer());
 }
@@ -10444,7 +10493,7 @@ async function removeEmptyDirectory(folder, parent, name) {
 
 module.exports = { readBytes, sameBytes, writeBytes, findFile, relocateFile, removeEmptyDirectory };
 
-},{}],47:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, "&amp;")
@@ -10455,11 +10504,16 @@ function escapeHtml(text) {
 const TOKENS =
   /(--[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$))|('(?:''|[^'])*(?:'|$)|"(?:""|[^"])*(?:"|$))|\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|INSERT|INTO|UPDATE|DELETE|CREATE|ALTER|DROP|TABLE|VIEW|AS|AND|OR|NOT|NULL|IS|IN|LIKE|ORDER|BY|GROUP|HAVING|LIMIT|CASE|WHEN|THEN|ELSE|END|VALUES|SET|DISTINCT|UNION|ALL)\b|\b(\d+(?:\.\d+)?)\b/gi;
 
-function highlightSql(text) {
+function highlightSql(text, { start = 0, end: limit = text.length } = {}) {
   let result = "";
   let end = 0;
   for (const match of String(text).matchAll(TOKENS)) {
-    result += escapeHtml(text.slice(end, match.index));
+    if (match.index >= limit) break;
+    if (match.index + match[0].length <= start) {
+      end = match.index + match[0].length;
+      continue;
+    }
+    result += escapeHtml(text.slice(Math.max(start, end), Math.min(limit, match.index)));
     const style = match[1]
       ? "sql-comment"
       : match[2]
@@ -10467,15 +10521,15 @@ function highlightSql(text) {
         : match[3]
           ? "sql-keyword"
           : "sql-number";
-    result += `<span class="${style}">${escapeHtml(match[0])}</span>`;
+    result += `<span class="${style}">${escapeHtml(text.slice(Math.max(start, match.index), Math.min(limit, match.index + match[0].length)))}</span>`;
     end = match.index + match[0].length;
   }
-  return result + escapeHtml(text.slice(end));
+  return result + escapeHtml(text.slice(Math.max(start, end), limit));
 }
 
 module.exports = { escapeHtml, highlightSql };
 
-},{}],48:[function(require,module,exports){
+},{}],49:[function(require,module,exports){
 function previousCharacterStart(value, position) {
   if (position === 0) return 0;
   const previous = value.charCodeAt(position - 1);
@@ -10539,7 +10593,7 @@ function applyMultiEdit(value, positions, action, text = "") {
 
 module.exports = { applyMultiEdit };
 
-},{}],49:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 function normalizeWorkspaces(value) {
   if (!Array.isArray(value)) return [];
   const ids = new Set();
