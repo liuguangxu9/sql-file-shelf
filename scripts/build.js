@@ -7,6 +7,10 @@ const source = path.join(root, 'src');
 const output = path.join(root, 'dist');
 
 fs.mkdirSync(output, { recursive: true });
+browserify(path.join(source, 'codec-worker.js')).bundle((error, buffer) => {
+  if (error) throw error;
+  fs.writeFileSync(path.join(output, 'codec-worker.js'), buffer);
+});
 browserify(path.join(source, 'app.js')).bundle((error, buffer) => {
   if (error) throw error;
   fs.writeFileSync(path.join(output, 'app.js'), buffer);

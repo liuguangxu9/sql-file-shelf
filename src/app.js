@@ -1,4 +1,5 @@
 const codec = require("./codec");
+const { decodeAsync } = require("./async-codec");
 const store = require("./workspace-store");
 const files = require("./file-model");
 const operations = require("./file-operations");
@@ -22,6 +23,7 @@ const state = {
   workspaceRenderVersion: 0,
   fileSearchTimer: null,
   editorDecorationTimer: null,
+  fileOpenVersion: 0,
   secondaryCursors: [],
   altDrag: null,
   multiComposing: null,
@@ -115,6 +117,7 @@ function setFileIdentity(name, path) {
 }
 
 function clearEditor() {
+  state.fileOpenVersion += 1;
   state.active = null;
   clearSecondaryCursors();
   const editor = $("editor");
@@ -293,35 +296,50 @@ async function removeWorkspace(id) {
 }
 
 async function openFile(workspaceId, entry) {
+  let version;
   try {
     if (state.dirty && state.active?.workspaceId === workspaceId &&
       state.active.path === entry.path) return true;
     if (state.dirty && !confirm("当前文件尚未保存，仍要打开其他文件吗？"))
       return false;
+    if (!state.dirty && state.active?.workspaceId === workspaceId &&
+      state.active.path === entry.path) return true;
+    version = ++state.fileOpenVersion;
+    setStatus(`正在打开 ${entry.name}…`);
     const bytes = await operations.readBytes(entry.handle);
-    const metadata = codec.detectEncoding(bytes);
-    const text = codec.decodeFileBytes(bytes, metadata);
+    if (version !== state.fileOpenVersion) return false;
+    const { metadata, text, newline } = await decodeAsync(bytes);
+    if (version !== state.fileOpenVersion) return false;
     state.active = {
       workspaceId,
       ...entry,
       metadata,
-      newline: codec.detectNewline(text),
+      newline,
       originalBytes: bytes,
     };
     clearSecondaryCursors();
     $("editor").value = text;
     resetEditorHistory();
     $("editor").disabled = false;
-    renderEditorDecorations();
+    scheduleEditorDecorations();
     const workspace = state.workspaces.find((item) => item.id === workspaceId);
     setFileIdentity(entry.name, `${workspace.name} / ${entry.path}`);
     markDirty(false);
     updateEditorInfo();
-    await renderFiles();
+    updateFileSelection();
+    setStatus(`已打开 ${entry.name}。`);
     return true;
   } catch (error) {
+    if (version !== undefined && version !== state.fileOpenVersion) return false;
     setStatus(`无法打开文件：${error.message}`, true);
     return false;
+  }
+}
+
+function updateFileSelection() {
+  for (const row of $("fileList").querySelectorAll(".fileRow")) {
+    row.classList.toggle("active", state.active?.workspaceId === state.activeWorkspaceId &&
+      row.dataset.path === state.active?.path);
   }
 }
 
@@ -1359,6 +1377,7 @@ $("globalSearch").addEventListener("input", () => {
   state.globalTimer = setTimeout(renderGlobalSearch, 250);
 });
 $("editor").addEventListener("input", () => {
+  state.fileOpenVersion += 1;
   rememberEditorInput();
   markDirty(true);
   scheduleEditorDecorations();
