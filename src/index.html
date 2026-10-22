@@ -580,21 +580,34 @@
       body { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
       .app { grid-template-rows: 56px 1fr 29px; }
       .top { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:12px; padding:0 16px; background:#f9fafc; }
-      .topStart { display:flex; align-items:center; gap:12px; min-width:0; }
-      .brand { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:650; }
+      .topStart { display:flex; align-items:center; gap:8px; min-width:0; }
+      .brand { display:flex; align-items:center; font-size:13px; font-weight:500; color:#788396; letter-spacing:.2px; }
       button { font-weight:500; border-radius:6px; }
       button:focus-visible, input:focus-visible { outline:2px solid #729cf2; outline-offset:2px; }
       button:disabled { opacity:.45; cursor:default; }
 
-      .workspaceSwitch { width:clamp(100px,25vw,220px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:#eef3fd; color:#285ebc; border-color:#d8e3f7; font-weight:600; }
+      .workspaceSwitch { display:flex; align-items:center; justify-content:center; gap:8px; width:clamp(100px,25vw,240px); min-width:0; border-color:transparent; background:transparent; color:#35435a; font-size:14px; font-weight:600; }
+      .workspaceSwitch:hover,.workspaceSwitch[aria-expanded="true"] { background:#edf0f5; border-color:transparent; }
+      #workspaceName { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .workspaceChevron { flex-shrink:0; width:12px; height:12px; fill:none; stroke:#8a95a6; stroke-width:1.5; }
+      .workspaceMenu { position:fixed; inset:auto; margin:0; width:min(300px,calc(100vw - 24px)); padding:6px; border:1px solid #e3e8ef; border-radius:10px; background:#fff; color:var(--ink); box-shadow:0 10px 32px #2430471a; }
+      .workspaceMenu::backdrop { background:transparent; }
+      .workspaceMenuList { max-height: min(320px,50vh); overflow-y:auto; }
+      .workspaceOption { display:flex; align-items:center; gap:10px; width:100%; padding:0 10px; height:38px; border:0; background:transparent; text-align:left; font-size:13px; color:#536078; }
+      .workspaceOption:hover,.workspaceOption:focus-visible { background:#f1f4f9; }
+      .workspaceOption[aria-checked="true"] { color:#3265bc; background:#f0f5fe; }
+      .workspaceOption .workspaceOptionName { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .workspaceCheck { width:16px; font-size:14px; }
+      .workspaceMenuActions { border-top:1px solid #edf0f5; margin-top:6px; padding-top:6px; }
+      .workspaceMenuEmpty { padding:16px 10px; color:#909aab; font-size:12px; }
       .quickOpen { justify-self:end; min-width:0; width:min(330px,100%); display:flex; align-items:center; justify-content:space-between; color:#76839a; background:#fff; }
       kbd { font:11px "Segoe UI", sans-serif; color:#7a8799; background:#f4f6f9; border:1px solid #e4e9ef; border-radius:4px; padding:2px 5px; }
       .layout { grid-template-columns: minmax(220px, var(--files-width)) 5px minmax(0, 1fr); }
       .layout.navigationHidden { grid-template-columns:minmax(0,1fr); }
       .navigationHidden > .navigation,.navigationHidden > .resizer { display:none; }
       .navigation { background:#f9fafc; }
-      .navigationToggle { display:flex; align-items:center; gap:6px; border:1px solid transparent; background:transparent; color:#61728a; padding:0 7px; white-space:nowrap; }
-      .navigationToggle:hover { background:#eaf0fa; color:#285ebc; }
+      .navigationToggle { display:flex; align-items:center; gap:6px; border:1px solid transparent; background:transparent; color:#8490a1; width:30px; height:30px; justify-content:center; padding:0; white-space:nowrap; }
+      .navigationToggle:hover { background:#edf0f5; color:#536078; }
       .navigationToggle svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.5; }
       .navigationToggle .sidebarArrow { transform-origin:11.5px 10px; transition:transform .15s; }
       .navigationToggle.collapsed .sidebarArrow { transform:rotate(180deg); }
@@ -686,7 +699,7 @@
       <header class="top">
         <div class="topStart"><button id="toggleNavigation" class="navigationToggle" title="隐藏左侧目录栏（Ctrl+B）" aria-label="隐藏左侧目录栏（Ctrl+B）" aria-controls="directoryNavigation" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M7 3v14"/><path class="sidebarArrow" d="m13 7-3 3 3 3"/></svg></button>
         <div class="brand">SQL 文件架</div></div>
-        <button id="manageWorkspaces" class="workspaceSwitch">选择工作区 ▾</button>
+        <button id="manageWorkspaces" class="workspaceSwitch" popovertarget="workspaceMenu" aria-haspopup="menu" aria-expanded="false"><span id="workspaceName">选择工作区</span><svg class="workspaceChevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg></button>
         <button id="quickOpen" class="quickOpen">搜索文件… <kbd>Ctrl P</kbd></button>
         <div class="top-note" id="workspaceSummary">正在读取工作区…</div>
         <button id="addWorkspace" class="primary">＋ 新增工作区</button>
@@ -797,9 +810,10 @@
       </section>
       <footer class="status"><span id="workspaceLocation"></span><span id="status" role="status">准备就绪</span><span id="saveState"></span><span id="cursorStatus"></span></footer>
     </main>
+    <div id="workspaceMenu" class="workspaceMenu" popover="auto" role="menu" aria-label="切换工作区"><div id="workspaceMenuList" class="workspaceMenuList" role="group" aria-label="工作区"></div><div class="workspaceMenuActions" role="group" aria-label="工作区操作"><button id="menuAddWorkspace" class="workspaceOption" role="menuitem">＋ 添加工作区</button><button id="menuManageWorkspaces" class="workspaceOption" role="menuitem">管理工作区…</button></div></div>
     <dialog id="workspaceDialog" class="workspaceDialog"><header class="dialogHeader"><strong>管理工作区</strong><button id="closeWorkspaces" aria-label="关闭工作区管理">×</button></header><div id="workspaceActions"></div></dialog>
     <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
     <div id="navViews"><button data-view="files" class="active">文件</button><button data-view="recent">最近</button><button data-view="favorites">收藏</button></div><div id="collectionList" class="scroll" hidden></div>
-    <script src="./app.js?v=26"></script>
+    <script src="./app.js?v=27"></script>
   </body>
 </html>

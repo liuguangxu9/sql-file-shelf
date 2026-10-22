@@ -276,7 +276,57 @@ module.exports = function setupWorkbench(api) {
   $('navViews').after($('fileSearch'));
   filePanel.append($('collectionList'));
   document.querySelector('.top-note').hidden = true;
-  $('manageWorkspaces').onclick = () => manager.showModal();
+  const workspaceMenu = $('workspaceMenu');
+  function positionWorkspaceMenu() {
+    if (!workspaceMenu.matches(':popover-open')) return;
+    const rect = $('manageWorkspaces').getBoundingClientRect();
+    const width = workspaceMenu.getBoundingClientRect().width;
+    workspaceMenu.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, (rect.left + rect.right - width) / 2))}px`;
+    workspaceMenu.style.top = `${rect.bottom + 8}px`;
+  }
+  function renderWorkspaceMenu() {
+    const list = $('workspaceMenuList');
+    list.replaceChildren();
+    for (const workspace of state.workspaces) {
+      const selected = workspace.id === state.activeWorkspaceId;
+      const pick = button('', () => {
+        workspaceMenu.hidePopover();
+        api.requestAccess(workspace.id);
+      }, workspace.name);
+      pick.className = 'workspaceOption';
+      pick.setAttribute('role', 'menuitemradio');
+      pick.setAttribute('aria-checked', String(selected));
+      pick.append(node('span', workspace.name, 'workspaceOptionName'), node('span', selected ? '✓' : '', 'workspaceCheck'));
+      list.append(pick);
+    }
+    if (!state.workspaces.length) list.append(node('div', '还没有工作区，添加一个本地目录。', 'workspaceMenuEmpty'));
+  }
+  workspaceMenu.addEventListener('beforetoggle', event => {
+    $('manageWorkspaces').setAttribute('aria-expanded', String(event.newState === 'open'));
+    if (event.newState === 'open') renderWorkspaceMenu();
+  });
+  workspaceMenu.addEventListener('toggle', event => {
+    if (event.newState === 'open') {
+      positionWorkspaceMenu();
+      (workspaceMenu.querySelector('[aria-checked="true"]') || workspaceMenu.querySelector('button'))?.focus();
+    }
+  });
+  $('manageWorkspaces').addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); workspaceMenu.showPopover(); }
+  });
+  workspaceMenu.addEventListener('keydown', event => {
+    const items = [...workspaceMenu.querySelectorAll('button')];
+    const index = items.indexOf(document.activeElement);
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    }
+    if (event.key === 'Escape') $('manageWorkspaces').focus();
+  });
+  window.addEventListener('resize', positionWorkspaceMenu);
+  $('menuAddWorkspace').onclick = () => { workspaceMenu.hidePopover(); $('addWorkspace').click(); };
+  $('menuManageWorkspaces').onclick = () => { workspaceMenu.hidePopover(); manager.showModal(); };
   $('closeWorkspaces').onclick = () => manager.close();
   $('closeSearch').onclick = () => $('searchDialog').close();
   $('searchDialog').addEventListener('close', () => { clearTimeout(state.globalTimer); });
@@ -397,8 +447,9 @@ module.exports = function setupWorkbench(api) {
       sync();
     },
     refresh() {
-      $('manageWorkspaces').textContent = `${state.workspaces.find(w => w.id === state.activeWorkspaceId)?.name || '选择工作区'} ▾`;
-      $('manageWorkspaces').title = $('manageWorkspaces').textContent;
+      $('workspaceName').textContent = state.workspaces.find(w => w.id === state.activeWorkspaceId)?.name || '选择工作区';
+      $('manageWorkspaces').title = $('workspaceName').textContent;
+      if (workspaceMenu.matches(':popover-open')) renderWorkspaceMenu();
       const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
       $('workspaceLocation').textContent = workspace ? `当前目录：${workspace.name}${state.selectedFolders.get(workspace.id) ? ' / ' + state.selectedFolders.get(workspace.id) : ''}` : '尚未选择本地目录';
       $('workspaceLocation').title = '浏览器仅提供授权目录名称和相对路径，不暴露完整磁盘路径';

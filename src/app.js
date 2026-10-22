@@ -1376,7 +1376,7 @@ async function init() {
   setupResizers();
   workbench = setupWorkbench({ state, $, get, put, openFile, renderFiles, render,
     updateEditorInfo, setFileIdentity, renderEditorDecorations, updateFileSelection,
-    clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, editorLines });
+    clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, editorLines, requestAccess });
   await workbench.ready;
   const layout = await get("layout");
   if (layout?.workspace)
