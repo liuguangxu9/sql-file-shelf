@@ -49,12 +49,8 @@
   document.querySelector('[data-view="recent"]').click();
   assert($('collectionList').textContent.includes('医嘱查询.sql'),'recent files collected');
   document.querySelector('[data-view="files"]').click();
-  $('contentSearch').click(); input($('globalSearch'),'patient_id');
-  await wait(() => $('globalResults').querySelectorAll('.result').length>0);
-  assert($('globalResults').querySelector('code'),'content search shows matching context');
-  $('globalResults').querySelector('.result').click();
-  await wait(() => editor.selectionEnd>editor.selectionStart && editor.value.slice(editor.selectionStart,editor.selectionEnd)==='patient_id');
-  assert(editor.value.slice(editor.selectionStart,editor.selectionEnd)==='patient_id','result jumps to matching SQL');
+  assert(!$('contentSearch'),'standalone full-text search removed');
+  assert(document.querySelector('.localBadge').textContent==='文件不上传','local storage label is plain language');
   $('quickOpen').click(); input($('globalSearch'),'no-such-file'); input($('globalSearch'),'费用核对');
   await wait(() => $('globalResults').querySelector('.result'));
   assert($('globalResults').textContent.includes('费用核对.sql') && !$('globalResults').textContent.includes('医嘱查询.sql'),'latest quick search wins');
@@ -86,7 +82,7 @@
   $('manageWorkspaces').click();
   [...document.querySelectorAll('#workspaceList .workspace button')].find(b=>b.textContent.includes('第二工作区')).click();
   await wait(()=>document.querySelector('.fileRow[data-path="GBK测试.sql"]'));
-  $('closeWorkspaces').click();
+  assert(!$('workspaceDialog').open,'successful workspace selection closes manager');
   await open('GBK测试.sql');
   assert(editor.value.includes('中文'),'GBK file decodes');
   assert($('encoding').textContent==='GBK','GBK metadata retained');

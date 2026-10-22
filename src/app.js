@@ -5,10 +5,11 @@ const { decodeAsync } = require("./async-codec");
 const store = require("./workspace-store");
 const files = require("./file-model");
 const operations = require("./file-operations");
+const { renameDirectory, renamedPath, isWithin } = require("./folder-operations");
 const { editIndent } = require("./editor-indent");
 const { applyMultiEdit } = require("./multi-cursor");
 const { escapeHtml, highlightSql } = require("./highlight");
-const { lineStarts, editorWindow } = require("./editor-window");
+const { editorWindow } = require("./editor-window");
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const MAX_HIGHLIGHT_CHARS = 180000;
 const state = {
@@ -16,6 +17,8 @@ const state = {
   activeWorkspaceId: null,
   fileCache: new Map(),
   folderCache: new Map(),
+  scanning: new Map(),
+  fileIndexVersion: 0,
   selectedFolders: new Map(),
   expandedFolders: new Map(),
   active: null,
@@ -44,19 +47,27 @@ const setStatus = (text, error = false) => {
   $("status").classList.toggle("error", error);
 };
 const markDirty = (dirty) => {
+  if (state.dirty === dirty) return;
   state.dirty = dirty;
   $("save").textContent = "保存";
   workbench?.sync();
 };
 
+let databasePromise;
 function db() {
-  return new Promise((resolve, reject) => {
+  if (databasePromise) return databasePromise;
+  databasePromise = new Promise((resolve, reject) => {
     const request = indexedDB.open("sql-file-shelf", 1);
     request.onupgradeneeded = () =>
       request.result.createObjectStore("settings");
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => { database.close(); databasePromise = null; };
+      resolve(database);
+    };
+    request.onerror = () => { databasePromise = null; reject(request.error); };
   });
+  return databasePromise;
 }
 async function get(key) {
   const database = await db();
@@ -72,14 +83,14 @@ async function get(key) {
 async function put(key, value) {
   const database = await db();
   return new Promise((resolve, reject) => {
-    const request = database
-      .transaction("settings", "readwrite")
-      .objectStore("settings")
-      .put(value, key);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const transaction = database.transaction("settings", "readwrite");
+    transaction.objectStore("settings").put(value, key);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error("本地设置保存已中止。"));
   });
 }
+
 async function persist() {
   await put("workspaces", state.workspaces);
   await put("activeWorkspaceId", state.activeWorkspaceId);
@@ -178,12 +189,20 @@ async function walk(directory, path = "", folders = [], folderRecord = null) {
 }
 
 async function scanWorkspace(workspace) {
-  if (!workspace || !(await permission(workspace.handle))) return [];
-  const folders = [{ path: "", handle: workspace.handle, empty: false }];
-  const result = await walk(workspace.handle, "", folders, folders[0]);
-  state.fileCache.set(workspace.id, result);
-  state.folderCache.set(workspace.id, folders);
-  return result;
+  if (!workspace) return [];
+  if (state.scanning.has(workspace.id)) return state.scanning.get(workspace.id);
+  const task = (async () => {
+    if (!(await permission(workspace.handle))) return [];
+    const folders = [{ path: "", handle: workspace.handle, empty: false }];
+    const result = await walk(workspace.handle, "", folders, folders[0]);
+    state.fileCache.set(workspace.id, result);
+    state.folderCache.set(workspace.id, folders);
+    state.fileIndexVersion++;
+    return result;
+  })();
+  state.scanning.set(workspace.id, task);
+  try { return await task; }
+  finally { state.scanning.delete(workspace.id); }
 }
 
 async function refreshCurrentWorkspace() {
@@ -202,24 +221,23 @@ async function refreshCurrentWorkspace() {
 }
 
 async function selectWorkspace(id) {
-  if (!state.workspaces.some((item) => item.id === id)) return;
-  if (id === state.activeWorkspaceId) {
-    state.selectedFolders.set(id, "");
-    await renderFiles();
-    setStatus(`已选中 ${current().name} 根目录，新建文件将保存在此。`);
-    return;
-  }
+  const workspace = state.workspaces.find(item => item.id === id);
+  if (!workspace) return false;
+  const granted = await permission(workspace.handle);
+  if (granted) $("workspaceDialog").close();
   workbench?.capture();
   state.activeWorkspaceId = id;
   state.selectedFolders.set(id, "");
+  workbench?.refresh();
   await persist();
-  const workspace = current();
-  if (workspace && (await permission(workspace.handle))) {
+  if (granted && !state.fileCache.has(id)) {
     setStatus(`正在读取 ${workspace.name}…`);
     await scanWorkspace(workspace);
-    setStatus(`已读取 ${workspace.name}。`);
   }
+  if (state.activeWorkspaceId !== id) return false;
   await render();
+  setStatus(granted ? `已选择 ${workspace.name}。` : `请恢复“${workspace.name}”的目录访问权限。`, !granted);
+  return granted;
 }
 
 async function addWorkspace() {
@@ -245,6 +263,7 @@ async function addWorkspace() {
     const workspace = { id: makeId(), name: handle.name, handle };
     state.workspaces.push(workspace);
     state.activeWorkspaceId = workspace.id;
+    $("workspaceDialog").close();
     await persist();
     await scanWorkspace(workspace);
     await render();
@@ -394,8 +413,6 @@ function expandedFolders(workspaceId) {
 function toggleFolderPath(path) {
   const workspace = current();
   if (!workspace) return;
-  const body = $("fileList");
-  const before = new Map([...body.children].map((row) => [row.dataset.path, row.getBoundingClientRect().top]));
   const expanded = expandedFolders(workspace.id);
   const wasOpen = Boolean($("fileSearch").value.trim()) || expanded.has(path);
   state.selectedFolders.set(workspace.id, path);
@@ -406,30 +423,7 @@ function toggleFolderPath(path) {
     clearTimeout(state.fileSearchTimer);
   }
   renderFiles();
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches || body.children.length > 160) return;
-  for (const row of body.children) {
-    const previousTop = before.get(row.dataset.path);
-    if (previousTop === undefined) {
-      row.animate(
-        [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "translateY(0)" }],
-        { duration: 170, easing: "cubic-bezier(.2,.7,.25,1)" },
-      );
-    } else {
-      const delta = previousTop - row.getBoundingClientRect().top;
-      if (Math.abs(delta) > 1)
-        row.animate(
-          [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
-          { duration: 190, easing: "cubic-bezier(.2,.7,.25,1)" },
-        );
-    }
-  }
-  body.querySelectorAll(".folderRow").forEach((row) => {
-    if (row.dataset.path !== path) return;
-    row.querySelector(".treeToggle svg")?.animate(
-      [{ transform: `rotate(${wasOpen ? 90 : 0}deg)` }, { transform: `rotate(${wasOpen ? 0 : 90}deg)` }],
-      { duration: 170, easing: "ease-out" },
-    );
-  });
+  workbench?.refresh();
 }
 
 async function newFolder() {
@@ -507,6 +501,78 @@ async function deleteFolder(folder) {
   } catch (error) {
     setStatus(`删除目录失败：${error.message}`, true);
   }
+}
+
+function chooseFolderName(folder) {
+  return new Promise(resolve => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "fileDialog";
+    const heading = document.createElement("h2"); heading.textContent = "重命名目录";
+    const location = document.createElement("p"); location.textContent = folder.path;
+    const input = document.createElement("input"); input.value = folder.handle.name;
+    input.setAttribute("aria-label", "新目录名称");
+    const error = document.createElement("p"); error.className = "error"; error.setAttribute("role", "alert");
+    const actions = document.createElement("div"); actions.className = "dialogActions";
+    const cancel = document.createElement("button"); cancel.textContent = "取消";
+    const submit = document.createElement("button"); submit.textContent = "重命名"; submit.className = "primary";
+    cancel.onclick = () => dialog.close();
+    const accept = () => {
+      const result = files.validateFolderName(input.value);
+      if (!result.valid) { error.textContent = result.error; return; }
+      dialog.close(result.name);
+    };
+    submit.onclick = accept;
+    input.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); accept(); } });
+    actions.append(cancel, submit); dialog.append(heading, location, input, error, actions);
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => { const name = dialog.returnValue || null; dialog.remove(); resolve(name); }, { once:true });
+    dialog.showModal(); input.focus(); input.select();
+  });
+}
+
+async function renameFolder(folder) {
+  const workspace = current();
+  if (!workspace || !folder.path || state.busy) return;
+  if (!(await permission(workspace.handle))) return setStatus("请先恢复目录访问权限。", true);
+  const name = await chooseFolderName(folder);
+  if (!name || name === folder.handle.name) return;
+  const parentPath = folder.path.includes("/") ? folder.path.slice(0, folder.path.lastIndexOf("/")) : "";
+  const parent = (state.folderCache.get(workspace.id) || []).find(item => item.path === parentPath);
+  if (!parent) return setStatus("父目录已失效，请刷新后重试。", true);
+  const destination = joinedPath(parentPath, name);
+  state.busy = true; document.querySelector("main").inert = true;
+  workbench?.capture();
+  let moved = false;
+  try {
+    await state.scanning.get(workspace.id);
+    const nestedWorkspaces = [];
+    for (const other of state.workspaces) {
+      if (other.id === workspace.id) continue;
+      const relative = await workspace.handle.resolve(other.handle);
+      if (relative && isWithin(relative.join("/"), folder.path))
+        nestedWorkspaces.push({ other, relative:relative.slice(folder.path.split("/").length) });
+    }
+    setStatus(`正在重命名 ${folder.path}…`);
+    const renamedHandle = await renameDirectory(parent.handle, folder.handle.name, name, count => setStatus(`正在重命名目录，已校验 ${count} 个文件…`));
+    moved = true;
+    state.selectedFolders.set(workspace.id, renamedPath(state.selectedFolders.get(workspace.id) || "", folder.path, destination));
+    state.expandedFolders.set(workspace.id, new Set([...expandedFolders(workspace.id)].map(path => renamedPath(path, folder.path, destination))));
+    await scanWorkspace(workspace);
+    await workbench?.renameFolder(workspace.id, folder.path, destination);
+    for (const { other, relative } of nestedWorkspaces) {
+      let handle = renamedHandle;
+      for (const part of relative) handle = await handle.getDirectoryHandle(part);
+      if (other.name === other.handle.name) other.name = handle.name;
+      other.handle = handle;
+      await scanWorkspace(other);
+      await workbench?.renameFolder(other.id, "", "");
+    }
+    if (nestedWorkspaces.length) await persist();
+    await render();
+    setStatus(`目录已重命名为 ${destination}。`);
+  } catch (error) {
+    setStatus(`${moved ? "目录已重命名，但列表更新失败，请刷新" : "重命名未完成"}：${error.message}`, true);
+  } finally { state.busy = false; document.querySelector("main").inert = false; }
 }
 
 function chooseFileLocation(entry, folders) {
@@ -730,6 +796,13 @@ async function renderFiles() {
       icon.append(shape);
       row.addEventListener("click", () => toggleFolderPath(node.path));
       content.append(arrow, icon, pick);
+      const rename = document.createElement("button");
+      rename.className = "fileAction folderRename";
+      rename.textContent = "✎";
+      rename.title = `重命名目录 ${node.path}`;
+      rename.setAttribute("aria-label", rename.title);
+      rename.addEventListener("click", event => { event.stopPropagation(); renameFolder(node.folder); });
+      content.append(rename);
       if (node.folder.empty) {
         const remove = document.createElement("button");
         remove.className = "fileDelete folderDelete";
@@ -980,11 +1053,11 @@ function changeEncoding() {
 }
 
 function renderEditorDecorations() {
-  clearTimeout(state.editorDecorationTimer);
+  cancelAnimationFrame(state.editorDecorationTimer);
+  state.editorDecorationTimer = null;
   const editor = $("editor");
   const text = editor.value;
   const shell = editor.parentElement;
-  shell.classList.remove("editing");
   if (text.length > MAX_HIGHLIGHT_CHARS) {
     shell.classList.add("plainEditor");
     $("lineNumberContent").textContent = "";
@@ -997,12 +1070,11 @@ function renderEditorDecorations() {
 }
 function renderEditorWindow(force = false) {
   const editor = $("editor");
-  if (editor.parentElement.classList.contains("plainEditor") ||
-    editor.parentElement.classList.contains("editing")) return;
+  if (editor.parentElement.classList.contains("plainEditor")) return;
   const text = editor.value;
   let cache = state.editorWindowCache;
   if (!cache || cache.text !== text) {
-    cache = state.editorWindowCache = { text, starts: lineStarts(text) };
+    cache = state.editorWindowCache = { text, starts: editorLines(text) };
   }
   const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
   const view = editorWindow(cache.starts, text.length, editor.scrollTop, editor.clientHeight, lineHeight);
@@ -1020,10 +1092,10 @@ function renderEditorWindow(force = false) {
   numbers.style.transform = `translateY(${y}px)`;
 }
 function scheduleEditorDecorations() {
-  $("editor").parentElement.classList.add("editing");
-  clearTimeout(state.editorDecorationTimer);
-  state.editorDecorationTimer = setTimeout(renderEditorDecorations, 140);
+  if (state.editorDecorationTimer !== null) return;
+  state.editorDecorationTimer = requestAnimationFrame(renderEditorDecorations);
 }
+
 function clearSecondaryCursors() {
   state.altDrag = null;
   state.secondaryCursors = [];
@@ -1304,7 +1376,7 @@ async function init() {
   setupResizers();
   workbench = setupWorkbench({ state, $, get, put, openFile, renderFiles, render,
     updateEditorInfo, setFileIdentity, renderEditorDecorations, updateFileSelection,
-    clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, decodeAsync });
+    clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, editorLines });
   await workbench.ready;
   const layout = await get("layout");
   if (layout?.workspace)
@@ -1377,7 +1449,6 @@ $("globalSearch").addEventListener("input", () => {
 });
 $("editor").addEventListener("input", () => {
   state.fileOpenVersion += 1;
-  updateFileSelection();
   rememberEditorInput();
   markDirty(true);
   scheduleEditorDecorations();

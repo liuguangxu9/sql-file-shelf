@@ -135,7 +135,8 @@ function validateNewFileName(value) {
 
 function validateFolderName(value) {
   const name = String(value || "").trim();
-  if (!name || name === "." || name === ".." || /[\\/:*?"<>|]/.test(name))
+  if (!name || name === "." || name === ".." || /[\\/:*?"<>|\x00-\x1f]/.test(name) ||
+    name.endsWith(".") || /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(name))
     return { valid: false, error: "目录名不能为空，且不能包含路径或文件系统保留字符。" };
   return { valid: true, name };
 }

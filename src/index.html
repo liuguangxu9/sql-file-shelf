@@ -517,9 +517,7 @@
       .editor::selection {
         background: rgba(39, 110, 241, 0.22);
       }
-      .editorShell.editing .editor,
       .editorShell.plainEditor .editor { color: #192235; }
-      .editorShell.editing .highlight,
       .editorShell.plainEditor .highlight { visibility: hidden; }
       .editorShell.plainEditor .lineNumbers { display: none; }
       .editorShell.plainEditor .editor { padding-left: 26px; }
@@ -587,7 +585,7 @@
       button { font-weight:500; border-radius:6px; }
       button:focus-visible, input:focus-visible { outline:2px solid #729cf2; outline-offset:2px; }
       button:disabled { opacity:.45; cursor:default; }
-      .iconButton { border:0; background:transparent; padding:0 6px; font-size:18px; }
+
       .workspaceSwitch { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
       .quickOpen { margin-left:auto; width: min(330px, 28vw); display:flex; align-items:center; justify-content:space-between; color:#76839a; background:#fff; }
       kbd { font:11px "Segoe UI", sans-serif; color:#7a8799; background:#f4f6f9; border:1px solid #e4e9ef; border-radius:4px; padding:2px 5px; }
@@ -596,6 +594,16 @@
       .layout.navigationHidden { grid-template-columns:minmax(0,1fr); }
       .navigationHidden > .navigation,.navigationHidden > .resizer { display:none; }
       .navigation { background:#f9fafc; }
+      .navigationToggle { display:flex; align-items:center; gap:6px; border:1px solid transparent; background:transparent; color:#61728a; padding:0 7px; white-space:nowrap; }
+      .navigationToggle:hover { background:#eaf0fa; color:#285ebc; }
+      .navigationToggle svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.5; }
+      .navigationToggle span { font-size:11px; }
+      .navigationToggle .sidebarArrow { transform-origin:11.5px 10px; transition:transform .15s; }
+      .navigationToggle.collapsed .sidebarArrow { transform:rotate(180deg); }
+      .treeToggle svg { transition:transform .12s ease; }
+      .folderRename { opacity:0; font-size:14px; }
+      .folderRow:hover .folderRename,.folderRow:focus-within .folderRename { opacity:1; }
+      .localBadge { cursor:help; }
       .navigation .panelHead { height:48px; flex-basis:48px; padding:8px 12px; border:0; }
       .navigation .panelTitle { margin:0; font-weight:500; }
       #navViews { order:-2; display:flex; gap:4px; padding:12px 12px 8px; }
@@ -669,7 +677,7 @@
       .lineNumbers,.highlight,.editor { font-size:14px; line-height:1.7; }
       @container (max-width:700px) { .meta { display:none; } .saveControls { flex-wrap:wrap; } }
       @media(max-width:900px) { .localBadge { display:none; } .layout { grid-template-columns:240px 5px minmax(0,1fr); } .top { gap:7px; } .brand { font-size:13px; } .workspaceSwitch { max-width:150px; } }
-      @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout.navigationHidden .navigation { display:flex; } .layout.navigationHidden .editorPanel { display:none; } .brandMark,.localBadge,.quickOpen kbd { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
+      @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout:not(.navigationHidden) .navigation { display:flex; } .layout:not(.navigationHidden) .editorPanel { display:none; } .brandMark,.localBadge,.quickOpen kbd { display:none; } .navigationToggle span { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
       .navigation .panelTitle > span:first-child { display:none; }
       .navigation .panelActions { width:100%; align-items:center; gap:5px; }
       .navigation .panelActions button { white-space:nowrap; padding:0 6px; font-size:11px; }
@@ -679,11 +687,11 @@
   <body>
     <main class="app">
       <header class="top">
-        <button id="toggleNavigation" class="iconButton" aria-label="折叠或展开导航" aria-expanded="true">☰</button>
+        <button id="toggleNavigation" class="navigationToggle" title="隐藏左侧目录栏（Ctrl+B）" aria-label="隐藏左侧目录栏（Ctrl+B）" aria-controls="directoryNavigation" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M7 3v14"/><path class="sidebarArrow" d="m13 7-3 3 3 3"/></svg><span id="navigationToggleLabel">收起目录</span></button>
         <div class="brand"><span class="brandMark">S</span> SQL 文件架</div>
         <button id="manageWorkspaces" class="workspaceSwitch">选择工作区 ▾</button>
         <button id="quickOpen" class="quickOpen">搜索文件… <kbd>Ctrl P</kbd></button>
-        <button id="contentSearch">全文搜索</button><span class="localBadge">● 本地优先</span>
+        <span class="localBadge" title="只在你的电脑上读写 SQL 文件，文件内容不会上传到网站服务器。">文件不上传</span>
         <div class="top-note" id="workspaceSummary">正在读取工作区…</div>
         <button id="addWorkspace" class="primary">＋ 新增工作区</button>
       </header>
@@ -779,7 +787,7 @@
             <div class="findRow"><input id="findInput" aria-label="查找文本" placeholder="查找文本…"><label><input type="checkbox" id="matchCase">区分大小写</label><span id="findCount"></span><button id="previousMatch" title="上一个匹配">↑</button><button id="nextMatch" title="下一个匹配">↓</button><button id="closeFind" aria-label="关闭查找">×</button></div>
             <div id="replaceRow" class="findRow" hidden><input id="replaceInput" aria-label="替换为" placeholder="替换为…"><button id="replaceOne">替换当前</button><button id="replaceAll">全部替换</button></div>
           </div>
-          <div id="emptyEditor"><div class="emptyMark">SQL</div><h1>让常用 SQL，随手可得。</h1><p>选择本地目录，开始整理与编辑你的脚本。</p><div><button id="emptyWorkspace" class="primary">选择工作区</button><button id="emptyQuickOpen">快速打开</button></div><div class="shortcutHints"><span><kbd>Ctrl P</kbd> 找文件</span><span><kbd>Ctrl Shift F</kbd> 搜内容</span><span><kbd>Ctrl S</kbd> 保存</span></div><small>文件保留在你的电脑中 · 保留原编码 · 保存前自动备份</small></div>
+          <div id="emptyEditor"><div class="emptyMark">SQL</div><h1>让常用 SQL，随手可得。</h1><p>选择本地目录，开始整理与编辑你的脚本。</p><div><button id="emptyWorkspace" class="primary">选择工作区</button><button id="emptyQuickOpen">快速打开</button></div><div class="shortcutHints"><span><kbd>Ctrl P</kbd> 找文件</span><span><kbd>Ctrl F</kbd> 文件内查找</span><span><kbd>Ctrl S</kbd> 保存</span></div><small>文件保留在你的电脑中 · 保留原编码 · 保存前自动备份</small></div>
           <textarea
             id="editor"
             class="editor"
@@ -794,8 +802,8 @@
       <footer class="status"><span id="workspaceLocation"></span><span id="status" role="status">准备就绪</span><span id="saveState"></span><span id="cursorStatus"></span></footer>
     </main>
     <dialog id="workspaceDialog" class="workspaceDialog"><header class="dialogHeader"><strong>管理工作区</strong><button id="closeWorkspaces" aria-label="关闭工作区管理">×</button></header><div id="workspaceActions"></div></dialog>
-    <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><input id="searchMode" type="hidden" value="files"><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
+    <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
     <div id="navViews"><button data-view="files" class="active">文件</button><button data-view="recent">最近</button><button data-view="favorites">收藏</button></div><div id="collectionList" class="scroll" hidden></div>
-    <script src="./app.js?v=23"></script>
+    <script src="./app.js?v=24"></script>
   </body>
 </html>

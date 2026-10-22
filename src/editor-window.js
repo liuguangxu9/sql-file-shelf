@@ -9,4 +9,14 @@ function editorWindow(starts, length, scrollTop, height, lineHeight) {
   const last = Math.min(starts.length, visible + Math.ceil(height / lineHeight) + 13);
   return { first, last, start: starts[first], end: starts[last] ?? length };
 }
-module.exports = { lineStarts, editorWindow };
+function cursorPosition(starts, offset) {
+  let low = 0, high = starts.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (starts[middle] <= offset) low = middle + 1;
+    else high = middle;
+  }
+  const index = Math.max(0, low - 1);
+  return { line: index + 1, column: offset - starts[index] + 1 };
+}
+module.exports = { lineStarts, editorWindow, cursorPosition };
