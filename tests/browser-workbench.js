@@ -50,7 +50,7 @@
   assert($('collectionList').textContent.includes('医嘱查询.sql'),'recent files collected');
   document.querySelector('[data-view="files"]').click();
   assert(!$('contentSearch'),'standalone full-text search removed');
-  assert(document.querySelector('.localBadge').textContent==='文件不上传','local storage label is plain language');
+  assert(!document.querySelector('.localBadge'),'top-right badge removed');
   $('quickOpen').click(); input($('globalSearch'),'no-such-file'); input($('globalSearch'),'费用核对');
   await wait(() => $('globalResults').querySelector('.result'));
   assert($('globalResults').textContent.includes('费用核对.sql') && !$('globalResults').textContent.includes('医嘱查询.sql'),'latest quick search wins');

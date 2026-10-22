@@ -90,3 +90,6 @@
 
 
 目录重命名实现依据：[Chrome File System Access 文档](https://developer.chrome.com/docs/capabilities/web-apis/file-system-access)说明目录不支持 move；因此在授权父目录内执行同级复制、字节校验、源目录清点、逐文件复核和非递归移除。操作不是系统级原子 rename：中断时保留目标副本和未迁移源内容，界面明确报告需检查的两个目录。重命名不覆盖目标，保留未保存的编辑草稿与最初磁盘字节用于后续冲突检测。
+
+
+2026-10-23 发布补充：用户要求左上侧栏按钮仅保留图标，动作语义保留在 title/aria-label；移除右上说明徽标。已授权将本地修订一并发布，沿用只更新 Cloudflare 的范围。

@@ -79,7 +79,7 @@
   document.querySelector('[data-view="files"]').click();
   const initial=$('toggleNavigation').getAttribute('aria-expanded');
   $('toggleNavigation').click();
-  assert($('navigationToggleLabel').textContent==='展开目录' && $('toggleNavigation').getAttribute('aria-expanded')==='false','directory toggle clearly describes next action');
+  assert(!$('toggleNavigation').textContent.trim() && $('toggleNavigation').title.includes('显示') && $('toggleNavigation').getAttribute('aria-expanded')==='false','directory toggle clearly describes next action');
   $('toggleNavigation').click();assert($('toggleNavigation').getAttribute('aria-expanded')===initial,'directory toggle restores panel');
   // Successful new-folder authorization closes manager, without opening any user directory.
   const picker=window.showDirectoryPicker;

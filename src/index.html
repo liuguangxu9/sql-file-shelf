@@ -589,7 +589,6 @@
       .workspaceSwitch { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
       .quickOpen { margin-left:auto; width: min(330px, 28vw); display:flex; align-items:center; justify-content:space-between; color:#76839a; background:#fff; }
       kbd { font:11px "Segoe UI", sans-serif; color:#7a8799; background:#f4f6f9; border:1px solid #e4e9ef; border-radius:4px; padding:2px 5px; }
-      .localBadge { font-size:11px; color:#527866; white-space:nowrap; }
       .layout { grid-template-columns: minmax(220px, var(--files-width)) 5px minmax(0, 1fr); }
       .layout.navigationHidden { grid-template-columns:minmax(0,1fr); }
       .navigationHidden > .navigation,.navigationHidden > .resizer { display:none; }
@@ -597,13 +596,11 @@
       .navigationToggle { display:flex; align-items:center; gap:6px; border:1px solid transparent; background:transparent; color:#61728a; padding:0 7px; white-space:nowrap; }
       .navigationToggle:hover { background:#eaf0fa; color:#285ebc; }
       .navigationToggle svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.5; }
-      .navigationToggle span { font-size:11px; }
       .navigationToggle .sidebarArrow { transform-origin:11.5px 10px; transition:transform .15s; }
       .navigationToggle.collapsed .sidebarArrow { transform:rotate(180deg); }
       .treeToggle svg { transition:transform .12s ease; }
       .folderRename { opacity:0; font-size:14px; }
       .folderRow:hover .folderRename,.folderRow:focus-within .folderRename { opacity:1; }
-      .localBadge { cursor:help; }
       .navigation .panelHead { height:48px; flex-basis:48px; padding:8px 12px; border:0; }
       .navigation .panelTitle { margin:0; font-weight:500; }
       #navViews { order:-2; display:flex; gap:4px; padding:12px 12px 8px; }
@@ -676,8 +673,8 @@
       #findCount { font-size:11px; color:#8793a5; white-space:nowrap; }
       .lineNumbers,.highlight,.editor { font-size:14px; line-height:1.7; }
       @container (max-width:700px) { .meta { display:none; } .saveControls { flex-wrap:wrap; } }
-      @media(max-width:900px) { .localBadge { display:none; } .layout { grid-template-columns:240px 5px minmax(0,1fr); } .top { gap:7px; } .brand { font-size:13px; } .workspaceSwitch { max-width:150px; } }
-      @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout:not(.navigationHidden) .navigation { display:flex; } .layout:not(.navigationHidden) .editorPanel { display:none; } .brandMark,.localBadge,.quickOpen kbd { display:none; } .navigationToggle span { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
+      @media(max-width:900px) { .layout { grid-template-columns:240px 5px minmax(0,1fr); } .top { gap:7px; } .brand { font-size:13px; } .workspaceSwitch { max-width:150px; } }
+      @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout:not(.navigationHidden) .navigation { display:flex; } .layout:not(.navigationHidden) .editorPanel { display:none; } .brandMark,.quickOpen kbd { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
       .navigation .panelTitle > span:first-child { display:none; }
       .navigation .panelActions { width:100%; align-items:center; gap:5px; }
       .navigation .panelActions button { white-space:nowrap; padding:0 6px; font-size:11px; }
@@ -687,11 +684,10 @@
   <body>
     <main class="app">
       <header class="top">
-        <button id="toggleNavigation" class="navigationToggle" title="隐藏左侧目录栏（Ctrl+B）" aria-label="隐藏左侧目录栏（Ctrl+B）" aria-controls="directoryNavigation" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M7 3v14"/><path class="sidebarArrow" d="m13 7-3 3 3 3"/></svg><span id="navigationToggleLabel">收起目录</span></button>
+        <button id="toggleNavigation" class="navigationToggle" title="隐藏左侧目录栏（Ctrl+B）" aria-label="隐藏左侧目录栏（Ctrl+B）" aria-controls="directoryNavigation" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M7 3v14"/><path class="sidebarArrow" d="m13 7-3 3 3 3"/></svg></button>
         <div class="brand"><span class="brandMark">S</span> SQL 文件架</div>
         <button id="manageWorkspaces" class="workspaceSwitch">选择工作区 ▾</button>
         <button id="quickOpen" class="quickOpen">搜索文件… <kbd>Ctrl P</kbd></button>
-        <span class="localBadge" title="只在你的电脑上读写 SQL 文件，文件内容不会上传到网站服务器。">文件不上传</span>
         <div class="top-note" id="workspaceSummary">正在读取工作区…</div>
         <button id="addWorkspace" class="primary">＋ 新增工作区</button>
       </header>
@@ -804,6 +800,6 @@
     <dialog id="workspaceDialog" class="workspaceDialog"><header class="dialogHeader"><strong>管理工作区</strong><button id="closeWorkspaces" aria-label="关闭工作区管理">×</button></header><div id="workspaceActions"></div></dialog>
     <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
     <div id="navViews"><button data-view="files" class="active">文件</button><button data-view="recent">最近</button><button data-view="favorites">收藏</button></div><div id="collectionList" class="scroll" hidden></div>
-    <script src="./app.js?v=24"></script>
+    <script src="./app.js?v=25"></script>
   </body>
 </html>

@@ -284,9 +284,7 @@ module.exports = function setupWorkbench(api) {
   $('emptyWorkspace').onclick = () => manager.showModal();
   function syncNavigation() {
     const hidden = layout.classList.contains('navigationHidden');
-    const label = hidden ? '展开目录' : '收起目录';
     const toggle = $('toggleNavigation');
-    $('navigationToggleLabel').textContent = label;
     toggle.title = hidden ? '显示左侧目录栏（Ctrl+B）' : '隐藏左侧目录栏（Ctrl+B）';
     toggle.setAttribute('aria-label', toggle.title);
     toggle.setAttribute('aria-expanded', String(!hidden));
