@@ -217,7 +217,7 @@ module.exports = function setupWorkbench(api) {
             try {
               capture();
               const tab = tabs.find(t => t.file.workspaceId === workspace.id && t.file.path === entry.path);
-              const text = tab ? tab.text : (await decodeAsync(new Uint8Array(await (await entry.handle.getFile()).arrayBuffer()))).text;
+              const text = (tab ? tab.text : (await decodeAsync(new Uint8Array(await (await entry.handle.getFile()).arrayBuffer()))).text).replace(/\r\n?/g, '\n');
               const hits = search.matches(text, query, false, 5);
               for (const match of hits.slice(0, 5)) results.push({ workspace, entry, match, excerpt: search.excerpt(text, match.start), draft: tab?.dirty });
             } catch (_) { skipped++; }
