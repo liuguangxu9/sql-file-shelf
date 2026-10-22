@@ -579,15 +579,15 @@
       :root { --files-width: 280px; --ink: #243047; --line: #e7ebf1; }
       body { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
       .app { grid-template-rows: 56px 1fr 29px; }
-      .top { gap: 12px; padding: 0 16px; background: #f9fafc; }
+      .top { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:12px; padding:0 16px; background:#f9fafc; }
+      .topStart { display:flex; align-items:center; gap:12px; min-width:0; }
       .brand { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:650; }
-      .brandMark { display:grid; place-items:center; width:27px; height:27px; border-radius:8px; color:#fff; background:#3167dc; font-size:17px; }
       button { font-weight:500; border-radius:6px; }
       button:focus-visible, input:focus-visible { outline:2px solid #729cf2; outline-offset:2px; }
       button:disabled { opacity:.45; cursor:default; }
 
-      .workspaceSwitch { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
-      .quickOpen { margin-left:auto; width: min(330px, 28vw); display:flex; align-items:center; justify-content:space-between; color:#76839a; background:#fff; }
+      .workspaceSwitch { width:clamp(100px,25vw,220px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:#eef3fd; color:#285ebc; border-color:#d8e3f7; font-weight:600; }
+      .quickOpen { justify-self:end; min-width:0; width:min(330px,100%); display:flex; align-items:center; justify-content:space-between; color:#76839a; background:#fff; }
       kbd { font:11px "Segoe UI", sans-serif; color:#7a8799; background:#f4f6f9; border:1px solid #e4e9ef; border-radius:4px; padding:2px 5px; }
       .layout { grid-template-columns: minmax(220px, var(--files-width)) 5px minmax(0, 1fr); }
       .layout.navigationHidden { grid-template-columns:minmax(0,1fr); }
@@ -633,8 +633,6 @@
       .saveControls select { width:92px; height:28px; font-size:11px; }
       .editorPanel { position:relative; min-width:0; }
       #emptyEditor { position:absolute; top:116px; bottom:0; left:0; right:0; z-index:5; background:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:24px; text-align:center; }
-      .emptyMark { font:600 22px Consolas,monospace; color:#4871c3; background:#eff4fd; width:78px; height:78px; display:grid; place-items:center; border:1px solid #e4ecfc; border-radius:22px; }
-      #emptyEditor h1 { font-size:23px; font-weight:600; margin:24px 0 0; letter-spacing:.3px; }
       #emptyEditor p { color:#8b95a6; font-size:13px; margin:12px 0 24px; }
       #emptyEditor button { margin:0 5px; height:36px; }
       .shortcutHints { display:flex; gap:20px; margin:36px 0 22px; color:#8b95a6; font-size:11px; }
@@ -674,7 +672,9 @@
       .lineNumbers,.highlight,.editor { font-size:14px; line-height:1.7; }
       @container (max-width:700px) { .meta { display:none; } .saveControls { flex-wrap:wrap; } }
       @media(max-width:900px) { .layout { grid-template-columns:240px 5px minmax(0,1fr); } .top { gap:7px; } .brand { font-size:13px; } .workspaceSwitch { max-width:150px; } }
-      @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout:not(.navigationHidden) .navigation { display:flex; } .layout:not(.navigationHidden) .editorPanel { display:none; } .brandMark,.quickOpen kbd { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
+      @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout:not(.navigationHidden) .navigation { display:flex; } .layout:not(.navigationHidden) .editorPanel { display:none; } .quickOpen kbd { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
+      @media(max-width:650px) { .topStart { gap:4px; } .workspaceSwitch { max-width:none; } .quickOpen { font-size:11px; padding:0 5px; } }
+      @media(max-width:400px) { .brand { max-width:64px; overflow:hidden; text-overflow:ellipsis; } .top { gap:4px; } }
       .navigation .panelTitle > span:first-child { display:none; }
       .navigation .panelActions { width:100%; align-items:center; gap:5px; }
       .navigation .panelActions button { white-space:nowrap; padding:0 6px; font-size:11px; }
@@ -684,8 +684,8 @@
   <body>
     <main class="app">
       <header class="top">
-        <button id="toggleNavigation" class="navigationToggle" title="隐藏左侧目录栏（Ctrl+B）" aria-label="隐藏左侧目录栏（Ctrl+B）" aria-controls="directoryNavigation" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M7 3v14"/><path class="sidebarArrow" d="m13 7-3 3 3 3"/></svg></button>
-        <div class="brand"><span class="brandMark">S</span> SQL 文件架</div>
+        <div class="topStart"><button id="toggleNavigation" class="navigationToggle" title="隐藏左侧目录栏（Ctrl+B）" aria-label="隐藏左侧目录栏（Ctrl+B）" aria-controls="directoryNavigation" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M7 3v14"/><path class="sidebarArrow" d="m13 7-3 3 3 3"/></svg></button>
+        <div class="brand">SQL 文件架</div></div>
         <button id="manageWorkspaces" class="workspaceSwitch">选择工作区 ▾</button>
         <button id="quickOpen" class="quickOpen">搜索文件… <kbd>Ctrl P</kbd></button>
         <div class="top-note" id="workspaceSummary">正在读取工作区…</div>
@@ -783,7 +783,7 @@
             <div class="findRow"><input id="findInput" aria-label="查找文本" placeholder="查找文本…"><label><input type="checkbox" id="matchCase">区分大小写</label><span id="findCount"></span><button id="previousMatch" title="上一个匹配">↑</button><button id="nextMatch" title="下一个匹配">↓</button><button id="closeFind" aria-label="关闭查找">×</button></div>
             <div id="replaceRow" class="findRow" hidden><input id="replaceInput" aria-label="替换为" placeholder="替换为…"><button id="replaceOne">替换当前</button><button id="replaceAll">全部替换</button></div>
           </div>
-          <div id="emptyEditor"><div class="emptyMark">SQL</div><h1>让常用 SQL，随手可得。</h1><p>选择本地目录，开始整理与编辑你的脚本。</p><div><button id="emptyWorkspace" class="primary">选择工作区</button><button id="emptyQuickOpen">快速打开</button></div><div class="shortcutHints"><span><kbd>Ctrl P</kbd> 找文件</span><span><kbd>Ctrl F</kbd> 文件内查找</span><span><kbd>Ctrl S</kbd> 保存</span></div><small>文件保留在你的电脑中 · 保留原编码 · 保存前自动备份</small></div>
+          <div id="emptyEditor"><p>选择本地目录，开始整理与编辑你的脚本。</p><div><button id="emptyQuickOpen" class="primary">快速打开</button></div><div class="shortcutHints"><span><kbd>Ctrl P</kbd> 找文件</span><span><kbd>Ctrl F</kbd> 文件内查找</span><span><kbd>Ctrl S</kbd> 保存</span></div><small>文件保留在你的电脑中 · 保留原编码 · 保存前自动备份</small></div>
           <textarea
             id="editor"
             class="editor"
@@ -800,6 +800,6 @@
     <dialog id="workspaceDialog" class="workspaceDialog"><header class="dialogHeader"><strong>管理工作区</strong><button id="closeWorkspaces" aria-label="关闭工作区管理">×</button></header><div id="workspaceActions"></div></dialog>
     <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
     <div id="navViews"><button data-view="files" class="active">文件</button><button data-view="recent">最近</button><button data-view="favorites">收藏</button></div><div id="collectionList" class="scroll" hidden></div>
-    <script src="./app.js?v=25"></script>
+    <script src="./app.js?v=26"></script>
   </body>
 </html>

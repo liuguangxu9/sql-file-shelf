@@ -145,6 +145,7 @@ module.exports = function setupWorkbench(api) {
     const collection = $('collectionList');
     collection.hidden = view === 'files';
     $('fileList').parentElement.hidden = view !== 'files';
+    filePanel.querySelector('.panelHead').hidden = view !== 'files';
     if (view === 'files') return;
     const query = $('fileSearch').value.toLocaleLowerCase();
     const items = (view === 'recent' ? recent : favorites)
@@ -281,7 +282,6 @@ module.exports = function setupWorkbench(api) {
   $('searchDialog').addEventListener('close', () => { clearTimeout(state.globalTimer); });
   $('quickOpen').onclick = showSearch;
   $('emptyQuickOpen').onclick = showSearch;
-  $('emptyWorkspace').onclick = () => manager.showModal();
   function syncNavigation() {
     const hidden = layout.classList.contains('navigationHidden');
     const toggle = $('toggleNavigation');
@@ -398,6 +398,7 @@ module.exports = function setupWorkbench(api) {
     },
     refresh() {
       $('manageWorkspaces').textContent = `${state.workspaces.find(w => w.id === state.activeWorkspaceId)?.name || '选择工作区'} ▾`;
+      $('manageWorkspaces').title = $('manageWorkspaces').textContent;
       const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
       $('workspaceLocation').textContent = workspace ? `当前目录：${workspace.name}${state.selectedFolders.get(workspace.id) ? ' / ' + state.selectedFolders.get(workspace.id) : ''}` : '尚未选择本地目录';
       $('workspaceLocation').title = '浏览器仅提供授权目录名称和相对路径，不暴露完整磁盘路径';
