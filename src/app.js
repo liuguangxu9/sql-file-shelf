@@ -1,3 +1,5 @@
+const setupWorkbench = require("./workbench");
+let workbench = null;
 const codec = require("./codec");
 const { decodeAsync } = require("./async-codec");
 const store = require("./workspace-store");
@@ -43,7 +45,8 @@ const setStatus = (text, error = false) => {
 };
 const markDirty = (dirty) => {
   state.dirty = dirty;
-  $("save").textContent = dirty ? "保存 ●" : "保存";
+  $("save").textContent = "保存";
+  workbench?.sync();
 };
 
 function db() {
@@ -128,7 +131,7 @@ function clearEditor() {
   editor.disabled = true;
   editor.scrollTop = 0;
   editor.scrollLeft = 0;
-  setFileIdentity("尚未打开文件", "从中间的文件列表选择文件。");
+  setFileIdentity("尚未打开文件", "从左侧文件列表选择文件。");
   markDirty(false);
   updateEditorInfo();
   renderEditorDecorations();
@@ -206,10 +209,7 @@ async function selectWorkspace(id) {
     setStatus(`已选中 ${current().name} 根目录，新建文件将保存在此。`);
     return;
   }
-  if (id !== state.activeWorkspaceId) {
-    if (state.dirty && !confirm("当前文件尚未保存。放弃修改并切换工作区吗？")) return;
-    clearEditor();
-  }
+  workbench?.capture();
   state.activeWorkspaceId = id;
   state.selectedFolders.set(id, "");
   await persist();
@@ -241,8 +241,7 @@ async function addWorkspace() {
       await selectWorkspace(existing.id);
       return;
     }
-    if (state.dirty && !confirm("当前文件尚未保存。放弃修改并切换到新工作区吗？")) return;
-    clearEditor();
+    workbench?.capture();
     const workspace = { id: makeId(), name: handle.name, handle };
     state.workspaces.push(workspace);
     state.activeWorkspaceId = workspace.id;
@@ -275,8 +274,8 @@ async function requestAccess(id) {
 async function removeWorkspace(id) {
   const workspace = state.workspaces.find((item) => item.id === id);
   if (!workspace) return;
-  const message = state.activeWorkspaceId === id && state.dirty
-    ? `当前文件尚未保存。放弃修改并从工具中移除“${workspace.name}”吗？本地文件不会删除。`
+  const message = workbench?.dirty(id)
+    ? `此工作区有未保存的标签。放弃这些修改并从工具中移除“${workspace.name}”吗？本地文件不会删除。`
     : `从工具中移除“${workspace.name}”？本地文件不会删除。`;
   if (!confirm(message)) return;
   const result = store.removeWorkspace(
@@ -284,6 +283,7 @@ async function removeWorkspace(id) {
     id,
     state.activeWorkspaceId,
   );
+  workbench?.removeWorkspace(id);
   state.workspaces = result.workspaces;
   state.activeWorkspaceId = result.activeId;
   state.fileCache.delete(id);
@@ -297,15 +297,11 @@ async function removeWorkspace(id) {
   await render();
 }
 
-async function openFile(workspaceId, entry) {
+async function openFile(workspaceId, entry, force = false) {
   let version;
   try {
-    if (state.dirty && state.active?.workspaceId === workspaceId &&
-      state.active.path === entry.path) return true;
-    if (state.dirty && !confirm("当前文件尚未保存，仍要打开其他文件吗？"))
-      return false;
-    if (!state.dirty && state.active?.workspaceId === workspaceId &&
-      state.active.path === entry.path) return true;
+    workbench?.capture();
+    if (!force && workbench?.restore(workspaceId, entry.path)) return true;
     version = ++state.fileOpenVersion;
     setStatus(`正在打开 ${entry.name}…`);
     updateFileSelection(entry.path, workspaceId);
@@ -313,6 +309,7 @@ async function openFile(workspaceId, entry) {
     if (version !== state.fileOpenVersion) return false;
     const { metadata, text, newline } = await decodeAsync(bytes);
     if (version !== state.fileOpenVersion) return false;
+    if (force) workbench?.discard(workspaceId, entry.path);
     state.active = {
       workspaceId,
       ...entry,
@@ -332,6 +329,7 @@ async function openFile(workspaceId, entry) {
     markDirty(false);
     updateEditorInfo();
     updateFileSelection();
+    workbench?.opened();
     setStatus(`已打开 ${entry.name}。`);
     return true;
   } catch (error) {
@@ -468,8 +466,11 @@ async function deleteFile(entry) {
     return;
   if (!(await permission(workspace.handle)))
     return setStatus(`“${workspace.name}”尚未获得访问授权。`, true);
+  if (workbench?.dirty(workspace.id, entry.path))
+    return setStatus("此文件有未保存的标签，请先保存或关闭该标签后再删除。", true);
   try {
     await entry.parent.removeEntry(entry.name);
+    workbench?.discard(workspace.id, entry.path);
     if (
       state.active?.workspaceId === workspace.id &&
       state.active.path === entry.path
@@ -561,7 +562,7 @@ async function editFileLocation(entry) {
   const workspace = current();
   if (!workspace || !(await permission(workspace.handle)))
     return setStatus("请先恢复工作区访问权限。", true);
-  if (state.dirty && state.active?.workspaceId === workspace.id && state.active.path === entry.path)
+  if (workbench?.dirty(workspace.id, entry.path))
     return setStatus("请先保存当前文件，再重命名或移动。", true);
   const folders = state.folderCache.get(workspace.id) || [];
   const choice = await chooseFileLocation(entry, folders);
@@ -577,6 +578,7 @@ async function editFileLocation(entry) {
   if (targetPath === entry.path) return;
   try {
     await operations.relocateFile(entry, targetFolder.handle, validated.name);
+    workbench?.discard(workspace.id, entry.path);
     await scanWorkspace(workspace);
     const moved = (state.fileCache.get(workspace.id) || []).find((item) => item.path === targetPath);
     if (state.active?.workspaceId === workspace.id && state.active.path === entry.path && moved) {
@@ -802,58 +804,7 @@ function updateSortMenu() {
 }
 
 async function renderGlobalSearch() {
-  const query = $("globalSearch").value.trim();
-  const target = $("globalResults");
-  target.replaceChildren();
-  if (!query) return;
-  setStatus("正在搜索所有已授权工作区…");
-  const term = query.toLocaleLowerCase();
-  const results = [];
-  for (const workspace of state.workspaces) {
-    let entries = state.fileCache.get(workspace.id);
-    if (!entries && (await permission(workspace.handle)))
-      entries = await scanWorkspace(workspace);
-    for (const entry of entries || []) {
-      let match = `${entry.name} ${entry.path}`
-        .toLocaleLowerCase()
-        .includes(term);
-      if (!match) {
-        try {
-          const raw = new Uint8Array(
-            await (await entry.handle.getFile()).arrayBuffer(),
-          );
-          match = codec
-            .decodeFileBytes(raw, codec.detectEncoding(raw))
-            .toLocaleLowerCase()
-            .includes(term);
-        } catch (_) {}
-      }
-      if (match) results.push({ workspace, entry });
-      if (results.length >= 80) break;
-    }
-    if (results.length >= 80) break;
-  }
-  for (const { workspace, entry } of results) {
-    const button = document.createElement("button");
-    button.className = "result";
-    const title = document.createElement("strong");
-    title.textContent = entry.name;
-    const location = document.createElement("small");
-    location.textContent = `${workspace.name} / ${entry.path}`;
-    button.append(title, location);
-    button.addEventListener("click", async () => {
-      if (!(await openFile(workspace.id, entry))) return;
-      if (state.activeWorkspaceId !== workspace.id) {
-        state.activeWorkspaceId = workspace.id;
-        await persist();
-      }
-      await render();
-    });
-    target.append(button);
-  }
-  if (!results.length)
-    target.innerHTML = '<div class="placeholder">没有找到匹配内容。</div>';
-  setStatus(`找到 ${results.length} 个匹配文件。`);
+  return workbench?.runSearch();
 }
 
 function saveBytes() {
@@ -892,6 +843,7 @@ async function writeTo(handle, parent, { backup, expectedBytes, name, path, payl
   state.editorHistory.current = editorSnapshot();
   setFileIdentity(name, `${owner.name} / ${path}`);
   markDirty(false);
+  workbench?.opened();
   await scanWorkspace(owner);
   await renderFiles();
   renderEditorDecorations();
@@ -945,6 +897,17 @@ function showConflict(diskBytes) {
   });
 }
 
+async function runWrite(action) {
+  if (state.busy || !state.active) return;
+  state.busy = true;
+  document.querySelector('main').inert = true;
+  try { await action(); }
+  finally {
+    state.busy = false;
+    document.querySelector('main').inert = false;
+    workbench?.capture(); workbench?.sync();
+  }
+}
 async function save() {
   try {
     if (!state.active) return;
@@ -961,9 +924,9 @@ async function save() {
         const choice = await showConflict(error.diskBytes);
         if (choice === "saveAs") return saveAs();
         if (choice === "reload") {
-          markDirty(false);
-          await openFile(state.active.workspaceId, state.active);
-          return setStatus("已重新加载磁盘版本。");
+          if (await openFile(state.active.workspaceId, state.active, true))
+            setStatus("已重新加载磁盘版本。");
+          return;
         }
         if (choice !== "overwrite") return setStatus("已取消保存；当前编辑内容仍在。", true);
         expected = error.diskBytes;
@@ -985,6 +948,8 @@ async function saveAs() {
   const validated = files.validateNewFileName(name);
   if (!validated.valid) return setStatus(validated.error, true);
   try {
+    if (validated.name !== state.active.path && workbench?.has(owner.id, validated.name))
+      return setStatus("目标文件已在另一标签打开，请先关闭目标标签后再另存。", true);
     const payload = saveBytes();
     const existing = await operations.findFile(owner.handle, validated.name);
     if (existing && await existing.isSameEntry(state.active.handle)) return save();
@@ -1188,9 +1153,7 @@ function editorSnapshot() {
   };
 }
 function resetEditorHistory() {
-  state.editorHistory.undo = [];
-  state.editorHistory.redo = [];
-  state.editorHistory.current = editorSnapshot();
+  state.editorHistory = { undo: [], redo: [], current: editorSnapshot(), restoring: false };
 }
 function rememberEditorInput() {
   const history = state.editorHistory;
@@ -1334,10 +1297,15 @@ function setupResizers() {
 async function render() {
   await renderWorkspaces();
   await renderFiles();
+  workbench?.refresh();
 }
 async function init() {
   setupEditorChrome();
   setupResizers();
+  workbench = setupWorkbench({ state, $, get, put, openFile, renderFiles, render,
+    updateEditorInfo, setFileIdentity, renderEditorDecorations, updateFileSelection,
+    clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, decodeAsync });
+  await workbench.ready;
   const layout = await get("layout");
   if (layout?.workspace)
     document.documentElement.style.setProperty(
@@ -1403,6 +1371,7 @@ $("fileSearch").addEventListener("input", () => {
   state.fileSearchTimer = setTimeout(renderFiles, 120);
 });
 $("globalSearch").addEventListener("input", () => {
+  workbench?.cancelSearch();
   clearTimeout(state.globalTimer);
   state.globalTimer = setTimeout(renderGlobalSearch, 250);
 });
@@ -1549,16 +1518,16 @@ $("editor").addEventListener("keydown", (event) => {
   editor.dispatchEvent(new Event("input", { bubbles: true }));
 });
 $("encodingSelect").addEventListener("change", changeEncoding);
-$("save").addEventListener("click", save);
-$("saveAs").addEventListener("click", saveAs);
+$("save").addEventListener("click", () => runWrite(save));
+$("saveAs").addEventListener("click", () => runWrite(saveAs));
 window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    save();
+    runWrite(save);
   }
 });
 window.addEventListener("beforeunload", (event) => {
-  if (state.dirty) {
+  if (state.dirty || workbench?.dirty()) {
     event.preventDefault();
     event.returnValue = "";
   }

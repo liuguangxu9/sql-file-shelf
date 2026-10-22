@@ -575,12 +575,115 @@
           grid-template-columns: 210px 8px 280px 8px minmax(420px, 1fr);
         }
       }
+
+      /* Workbench v23: compact navigation and content-first layout. */
+      [hidden] { display: none !important; }
+      :root { --files-width: 280px; --ink: #243047; --line: #e7ebf1; }
+      body { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+      .app { grid-template-rows: 56px 1fr 29px; }
+      .top { gap: 12px; padding: 0 16px; background: #f9fafc; }
+      .brand { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:650; }
+      .brandMark { display:grid; place-items:center; width:27px; height:27px; border-radius:8px; color:#fff; background:#3167dc; font-size:17px; }
+      button { font-weight:500; border-radius:6px; }
+      button:focus-visible, input:focus-visible { outline:2px solid #729cf2; outline-offset:2px; }
+      button:disabled { opacity:.45; cursor:default; }
+      .iconButton { border:0; background:transparent; padding:0 6px; font-size:18px; }
+      .workspaceSwitch { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:transparent; }
+      .quickOpen { margin-left:auto; width: min(330px, 28vw); display:flex; align-items:center; justify-content:space-between; color:#76839a; background:#fff; }
+      kbd { font:11px "Segoe UI", sans-serif; color:#7a8799; background:#f4f6f9; border:1px solid #e4e9ef; border-radius:4px; padding:2px 5px; }
+      .localBadge { font-size:11px; color:#527866; white-space:nowrap; }
+      .layout { grid-template-columns: minmax(220px, var(--files-width)) 5px minmax(0, 1fr); }
+      .layout.navigationHidden { grid-template-columns:minmax(0,1fr); }
+      .navigationHidden > .navigation,.navigationHidden > .resizer { display:none; }
+      .navigation { background:#f9fafc; }
+      .navigation .panelHead { height:48px; flex-basis:48px; padding:8px 12px; border:0; }
+      .navigation .panelTitle { margin:0; font-weight:500; }
+      #navViews { order:-2; display:flex; gap:4px; padding:12px 12px 8px; }
+      #navViews button { flex:1; border:0; color:#778397; background:transparent; }
+      #navViews button.active { background:#e9eef8; color:#285ebc; font-weight:600; }
+      #fileSearch { order:-1; margin:0 12px 4px; width:calc(100% - 24px); height:32px; font-size:12px; background:#fff; }
+      .resizer { border:0; background:#f0f3f7; }
+      .fileRow { padding-top:7px; padding-bottom:7px; background:transparent; border:0; }
+      .fileTree > div { border-bottom:0; }
+      .fileRow .fileNameText, .folderPick { font-weight:500; font-size:13px; }
+      .folderRow { background:transparent; }
+      .folderRow.open { background:transparent; }
+      .fileRow.active { background:#e8effc; box-shadow:inset 2px 0 #3971db; }
+      .fileRowActions { gap:0; opacity:0; }
+      .fileRow:hover .fileRowActions,.fileRow:focus-within .fileRowActions { opacity:1; }
+      .fileMeta { font-size:10px; color:#8b96a6; }
+      #editorTabs { display:flex; flex-shrink:0; overflow-x:auto; min-height:40px; background:#f4f6fa; border-bottom:1px solid var(--line); }
+      .editorTab { display:flex; flex-shrink:0; align-items:center; border-right:1px solid var(--line); border-top:2px solid transparent; max-width:260px; }
+      .editorTab.selected { border-top-color:#3c72dc; background:#fff; }
+      .editorTab button { border:0; background:transparent; height:36px; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .editorTab .closeTab { flex-shrink:0; padding:0 9px; color:#8b95a6; }
+      .tabsPlaceholder { align-self:center; padding:0 18px; color:#8b95a6; font-size:12px; }
+      .editorHead { flex-basis:76px; height:76px; padding:8px 18px; gap:7px; }
+      .fileIdentity strong { font-size:13px; font-weight:550; }
+      .fileIdentity small { font-size:11px; color:#8a95a6; }
+      .editorTools { gap:8px; }
+      .meta { font-size:10px; gap:7px; }
+      .saveControls { gap:5px; }
+      .saveControls button { font-size:11px; height:28px; padding:0 8px; }
+      .saveControls select { width:92px; height:28px; font-size:11px; }
+      .editorPanel { position:relative; min-width:0; }
+      #emptyEditor { position:absolute; top:116px; bottom:0; left:0; right:0; z-index:5; background:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:24px; text-align:center; }
+      .emptyMark { font:600 22px Consolas,monospace; color:#4871c3; background:#eff4fd; width:78px; height:78px; display:grid; place-items:center; border:1px solid #e4ecfc; border-radius:22px; }
+      #emptyEditor h1 { font-size:23px; font-weight:600; margin:24px 0 0; letter-spacing:.3px; }
+      #emptyEditor p { color:#8b95a6; font-size:13px; margin:12px 0 24px; }
+      #emptyEditor button { margin:0 5px; height:36px; }
+      .shortcutHints { display:flex; gap:20px; margin:36px 0 22px; color:#8b95a6; font-size:11px; }
+      #emptyEditor small { color:#a0a9b7; font-size:11px; }
+      .status { display:flex; align-items:center; gap:18px; padding:0 14px; font-size:10px; background:#f9fafc; }
+      #status { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #workspaceLocation { max-width:27%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #saveState,#cursorStatus { white-space:nowrap; }
+      .unsaved { color:#b67a23; }
+      .workspaceDialog,.searchDialog { border:1px solid #dfe5ef; border-radius:14px; padding:0; box-shadow:0 24px 90px #23365630; color:var(--ink); }
+      dialog::backdrop { background:#182c4d45; backdrop-filter:blur(3px); }
+      .workspaceDialog { width:min(460px,90vw); max-height:80vh; }
+      .workspaceDialog .panel { border:0; }
+      .dialogHeader { display:flex; align-items:center; justify-content:space-between; padding:16px 20px 10px; }
+      .dialogHeader strong { font-size:15px; font-weight:600; }
+      .dialogHeader button { border:0; background:transparent; font-size:19px; color:#8391a7; }
+      #workspaceActions { padding:0 20px 8px; }
+      .workspaceDialog .workspaceList { max-height:50vh; }
+      .searchDialog { width:min(760px,90vw); margin-top:12vh; }
+      #searchInputHost { padding:6px 20px; }
+      #globalSearch { height:42px; background:#f8fafe; }
+      #searchCount { color:#8b95a6; font-size:11px; padding:0 20px; }
+      #globalResults { max-height:50vh; padding:8px 12px; }
+      .result { height:auto; padding:12px; border-radius:8px; margin-bottom:3px; }
+      .result strong { font-size:13px; font-weight:550; }
+      .result code { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:8px; font:12px Consolas,monospace; color:#597295; }
+      .collectionItem { display:block; text-align:left; border:0; background:transparent; width:100%; height:auto; padding:12px 16px; }
+      .collectionItem:hover { background:#eaf0fa; }
+      .collectionItem strong,.collectionItem small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .collectionItem strong { font-size:13px; font-weight:500; }.collectionItem small { color:#8793a5; margin-top:5px; font-size:10px; }
+      #findBar { padding:10px 16px; background:#f7f9fc; border-bottom:1px solid var(--line); flex-shrink:0; }
+      .findRow { display:flex; align-items:center; gap:7px; }
+      .findRow + .findRow { margin-top:7px; }
+      .findRow > input { width:240px; min-width:60px; flex:1; border:1px solid var(--line); border-radius:5px; padding:7px 9px; font-size:12px; }
+      .findRow label { font-size:11px; white-space:nowrap; }.findRow label input { vertical-align:middle; }
+      #findCount { font-size:11px; color:#8793a5; white-space:nowrap; }
+      .lineNumbers,.highlight,.editor { font-size:14px; line-height:1.7; }
+      @container (max-width:700px) { .meta { display:none; } .saveControls { flex-wrap:wrap; } }
+      @media(max-width:900px) { .localBadge { display:none; } .layout { grid-template-columns:240px 5px minmax(0,1fr); } .top { gap:7px; } .brand { font-size:13px; } .workspaceSwitch { max-width:150px; } }
+      @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout.navigationHidden .navigation { display:flex; } .layout.navigationHidden .editorPanel { display:none; } .brandMark,.localBadge,.quickOpen kbd { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
+      .navigation .panelTitle > span:first-child { display:none; }
+      .navigation .panelActions { width:100%; align-items:center; gap:5px; }
+      .navigation .panelActions button { white-space:nowrap; padding:0 6px; font-size:11px; }
+      #fileCount { margin-left:auto; font-size:10px; white-space:nowrap; color:#8b95a6; }
     </style>
   </head>
   <body>
     <main class="app">
       <header class="top">
-        <div class="brand">SQL <b>文件架</b></div>
+        <button id="toggleNavigation" class="iconButton" aria-label="折叠或展开导航" aria-expanded="true">☰</button>
+        <div class="brand"><span class="brandMark">S</span> SQL 文件架</div>
+        <button id="manageWorkspaces" class="workspaceSwitch">选择工作区 ▾</button>
+        <button id="quickOpen" class="quickOpen">搜索文件… <kbd>Ctrl P</kbd></button>
+        <button id="contentSearch">全文搜索</button><span class="localBadge">● 本地优先</span>
         <div class="top-note" id="workspaceSummary">正在读取工作区…</div>
         <button id="addWorkspace" class="primary">＋ 新增工作区</button>
       </header>
@@ -642,10 +745,11 @@
           </div>
         </aside>
         <section class="panel editorPanel">
+          <div id="editorTabs" role="tablist" aria-label="已打开的文件"></div>
           <header class="editorHead">
             <div class="fileIdentity">
               <strong id="fileTitle">尚未打开文件</strong
-              ><small id="filePath">从左侧选择工作区，再从中间打开文件。</small>
+              ><small id="filePath">选择本地目录，然后打开文件。</small>
             </div>
             <div class="editorTools">
               <div class="meta">
@@ -654,6 +758,8 @@
                 ><span>换行 <b id="newline">—</b></span>
               </div>
               <div class="saveControls">
+                <button id="favoriteFile" disabled>☆ 收藏</button>
+                <button id="findFile">查找</button><button id="replaceFile">替换</button>
                 <select id="encodingSelect" disabled aria-label="保存编码">
                   <option value="utf-8">UTF-8</option>
                   <option value="utf-16le">UTF-16 LE</option>
@@ -669,6 +775,11 @@
               </div>
             </div>
           </header>
+          <div id="findBar" hidden>
+            <div class="findRow"><input id="findInput" aria-label="查找文本" placeholder="查找文本…"><label><input type="checkbox" id="matchCase">区分大小写</label><span id="findCount"></span><button id="previousMatch" title="上一个匹配">↑</button><button id="nextMatch" title="下一个匹配">↓</button><button id="closeFind" aria-label="关闭查找">×</button></div>
+            <div id="replaceRow" class="findRow" hidden><input id="replaceInput" aria-label="替换为" placeholder="替换为…"><button id="replaceOne">替换当前</button><button id="replaceAll">全部替换</button></div>
+          </div>
+          <div id="emptyEditor"><div class="emptyMark">SQL</div><h1>让常用 SQL，随手可得。</h1><p>选择本地目录，开始整理与编辑你的脚本。</p><div><button id="emptyWorkspace" class="primary">选择工作区</button><button id="emptyQuickOpen">快速打开</button></div><div class="shortcutHints"><span><kbd>Ctrl P</kbd> 找文件</span><span><kbd>Ctrl Shift F</kbd> 搜内容</span><span><kbd>Ctrl S</kbd> 保存</span></div><small>文件保留在你的电脑中 · 保留原编码 · 保存前自动备份</small></div>
           <textarea
             id="editor"
             class="editor"
@@ -680,8 +791,11 @@
           ></textarea>
         </section>
       </section>
-      <footer id="status" class="status">准备就绪</footer>
+      <footer class="status"><span id="workspaceLocation"></span><span id="status" role="status">准备就绪</span><span id="saveState"></span><span id="cursorStatus"></span></footer>
     </main>
-    <script src="./app.js?v=22"></script>
+    <dialog id="workspaceDialog" class="workspaceDialog"><header class="dialogHeader"><strong>管理工作区</strong><button id="closeWorkspaces" aria-label="关闭工作区管理">×</button></header><div id="workspaceActions"></div></dialog>
+    <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><input id="searchMode" type="hidden" value="files"><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
+    <div id="navViews"><button data-view="files" class="active">文件</button><button data-view="recent">最近</button><button data-view="favorites">收藏</button></div><div id="collectionList" class="scroll" hidden></div>
+    <script src="./app.js?v=23"></script>
   </body>
 </html>
