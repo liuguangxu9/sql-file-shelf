@@ -421,9 +421,10 @@ function selectFolderPath(path) {
   workbench?.refresh();
 }
 
-function toggleFolderPath(path) {
+function toggleFolderPath(path, select = false) {
   const workspace = current();
   if (!workspace) return;
+  if (select) state.selectedFolders.set(workspace.id, path);
   const expanded = expandedFolders(workspace.id);
   const wasOpen = Boolean($("fileSearch").value.trim()) || expanded.has(path);
   if (wasOpen) expanded.delete(path);
@@ -817,11 +818,11 @@ async function renderFiles() {
       }
       if (!counts.children.length) { counts.textContent = "空"; counts.title = "没有直属子目录或 SQL、TXT、MD 文件"; }
       pick.append(counts);
-      pick.title = `选中 ${node.path || workspace.name}，作为新建位置`;
+      pick.title = `${isOpen ? "收起" : "展开"} ${node.path || workspace.name}，并选为新建位置`;
       pick.setAttribute("aria-pressed", String(node.path === selected?.path));
       pick.addEventListener("click", (event) => {
         event.stopPropagation();
-        selectFolderPath(node.path);
+        toggleFolderPath(node.path, true);
       });
       const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       icon.setAttribute("viewBox", "0 0 20 20");
