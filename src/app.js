@@ -816,7 +816,6 @@ async function renderFiles() {
         counts.append(count);
       }
       if (!counts.children.length) { counts.textContent = "空"; counts.title = "没有直属子目录或 SQL、TXT、MD 文件"; }
-      pick.append(counts);
       pick.title = `${isOpen ? "收起" : "展开"} ${node.path || workspace.name}`;
       pick.setAttribute("aria-expanded", String(isOpen));
       pick.addEventListener("click", (event) => {
@@ -831,7 +830,7 @@ async function renderFiles() {
       shape.setAttribute("d", "M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z");
       icon.append(shape);
       row.addEventListener("click", () => selectFolderPath(node.path));
-      content.append(arrow, icon, pick);
+      content.append(arrow, icon, pick, counts);
       const rename = document.createElement("button");
       rename.className = "fileAction folderRename";
       rename.textContent = "⋯";
