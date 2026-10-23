@@ -413,17 +413,10 @@ function expandedFolders(workspaceId) {
   return state.expandedFolders.get(workspaceId);
 }
 
-function selectFolderPath(path) {
+function toggleFolderPath(path, select = false) {
   const workspace = current();
   if (!workspace) return;
-  state.selectedFolders.set(workspace.id, path);
-  renderFiles();
-  workbench?.refresh();
-}
-
-function toggleFolderPath(path) {
-  const workspace = current();
-  if (!workspace) return;
+  if (select) state.selectedFolders.set(workspace.id, path);
   const expanded = expandedFolders(workspace.id);
   const wasOpen = Boolean($("fileSearch").value.trim()) || expanded.has(path);
   if (wasOpen) expanded.delete(path);
@@ -816,12 +809,8 @@ async function renderFiles() {
         counts.append(count);
       }
       if (!counts.children.length) { counts.textContent = "空"; counts.title = "没有直属子目录或 SQL、TXT、MD 文件"; }
-      pick.title = `${isOpen ? "收起" : "展开"} ${node.path || workspace.name}`;
+      pick.title = `选中并${isOpen ? "收起" : "展开"} ${node.path || workspace.name}`;
       pick.setAttribute("aria-expanded", String(isOpen));
-      pick.addEventListener("click", (event) => {
-        event.stopPropagation();
-        toggleFolderPath(node.path);
-      });
       const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       icon.setAttribute("viewBox", "0 0 20 20");
       icon.setAttribute("aria-hidden", "true");
@@ -829,7 +818,7 @@ async function renderFiles() {
       const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
       shape.setAttribute("d", "M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z");
       icon.append(shape);
-      row.addEventListener("click", () => selectFolderPath(node.path));
+      row.addEventListener("click", () => toggleFolderPath(node.path, true));
       content.append(arrow, icon, pick, counts);
       const rename = document.createElement("button");
       rename.className = "fileAction folderRename";
