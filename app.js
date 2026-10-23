@@ -8503,15 +8503,19 @@ function simpleEnd(buf) {
   return buf && buf.length ? this.write(buf) : '';
 }
 },{"safe-buffer":38}],41:[function(require,module,exports){
+const UI = require("../vendor/workbench/workbench");
+const setupWorkbench = require("./workbench");
+let workbench = null;
 const codec = require("./codec");
 const { decodeAsync } = require("./async-codec");
 const store = require("./workspace-store");
 const files = require("./file-model");
 const operations = require("./file-operations");
+const { renameDirectory, renamedPath, isWithin } = require("./folder-operations");
 const { editIndent } = require("./editor-indent");
 const { applyMultiEdit } = require("./multi-cursor");
-const { escapeHtml, highlightSql } = require("./highlight");
-const { lineStarts, editorWindow } = require("./editor-window");
+const { highlightSql } = require("./highlight");
+
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const MAX_HIGHLIGHT_CHARS = 180000;
 const state = {
@@ -8519,17 +8523,16 @@ const state = {
   activeWorkspaceId: null,
   fileCache: new Map(),
   folderCache: new Map(),
+  scanning: new Map(),
+  fileIndexVersion: 0,
   selectedFolders: new Map(),
   expandedFolders: new Map(),
   active: null,
   dirty: false,
-  globalTimer: null,
   fileSort: { key: "modified", direction: "desc" },
   draggingWorkspaceId: null,
   workspaceRenderVersion: 0,
   fileSearchTimer: null,
-  editorDecorationTimer: null,
-  editorWindowCache: null,
   fileOpenVersion: 0,
   secondaryCursors: [],
   altDrag: null,
@@ -8544,21 +8547,31 @@ const makeId = () =>
 const extension = (name) => name.split(".").pop().toLowerCase();
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
+  $("status").title = text;
   $("status").classList.toggle("error", error);
 };
 const markDirty = (dirty) => {
+  if (state.dirty === dirty) return;
   state.dirty = dirty;
-  $("save").textContent = dirty ? "保存 ●" : "保存";
+  $("save").textContent = "保存";
+  workbench?.sync();
 };
 
+let databasePromise;
 function db() {
-  return new Promise((resolve, reject) => {
+  if (databasePromise) return databasePromise;
+  databasePromise = new Promise((resolve, reject) => {
     const request = indexedDB.open("sql-file-shelf", 1);
     request.onupgradeneeded = () =>
       request.result.createObjectStore("settings");
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => { database.close(); databasePromise = null; };
+      resolve(database);
+    };
+    request.onerror = () => { databasePromise = null; reject(request.error); };
   });
+  return databasePromise;
 }
 async function get(key) {
   const database = await db();
@@ -8574,14 +8587,14 @@ async function get(key) {
 async function put(key, value) {
   const database = await db();
   return new Promise((resolve, reject) => {
-    const request = database
-      .transaction("settings", "readwrite")
-      .objectStore("settings")
-      .put(value, key);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const transaction = database.transaction("settings", "readwrite");
+    transaction.objectStore("settings").put(value, key);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error("本地设置保存已中止。"));
   });
 }
+
 async function persist() {
   await put("workspaces", state.workspaces);
   await put("activeWorkspaceId", state.activeWorkspaceId);
@@ -8593,10 +8606,11 @@ async function permission(handle) {
 function updateEditorInfo() {
   const active = state.active;
   const disabled = !active;
-  ["save", "saveAs", "encodingSelect"].forEach((id) => {
+  ["save", "saveAs", "encodingSelect", "encodingButton", "findFile", "replaceFile"].forEach((id) => {
     $(id).disabled = disabled;
   });
   if (!active) {
+    closeEncodingMenu();
     $("encoding").textContent = "—";
     $("bom").textContent = "—";
     $("newline").textContent = "—";
@@ -8609,6 +8623,7 @@ function updateEditorInfo() {
   $("newline").textContent =
     active.newline === "crlf" ? "CRLF" : active.newline === "cr" ? "CR" : "LF";
   $("encodingSelect").value = active.metadata.encoding;
+  updateEncodingMenu();
 }
 
 function setFileIdentity(name, path) {
@@ -8633,7 +8648,7 @@ function clearEditor() {
   editor.disabled = true;
   editor.scrollTop = 0;
   editor.scrollLeft = 0;
-  setFileIdentity("尚未打开文件", "从中间的文件列表选择文件。");
+  setFileIdentity("尚未打开文件", "从左侧文件列表选择文件。");
   markDirty(false);
   updateEditorInfo();
   renderEditorDecorations();
@@ -8680,12 +8695,20 @@ async function walk(directory, path = "", folders = [], folderRecord = null) {
 }
 
 async function scanWorkspace(workspace) {
-  if (!workspace || !(await permission(workspace.handle))) return [];
-  const folders = [{ path: "", handle: workspace.handle, empty: false }];
-  const result = await walk(workspace.handle, "", folders, folders[0]);
-  state.fileCache.set(workspace.id, result);
-  state.folderCache.set(workspace.id, folders);
-  return result;
+  if (!workspace) return [];
+  if (state.scanning.has(workspace.id)) return state.scanning.get(workspace.id);
+  const task = (async () => {
+    if (!(await permission(workspace.handle))) return [];
+    const folders = [{ path: "", handle: workspace.handle, empty: false }];
+    const result = await walk(workspace.handle, "", folders, folders[0]);
+    state.fileCache.set(workspace.id, result);
+    state.folderCache.set(workspace.id, folders);
+    state.fileIndexVersion++;
+    return result;
+  })();
+  state.scanning.set(workspace.id, task);
+  try { return await task; }
+  finally { state.scanning.delete(workspace.id); }
 }
 
 async function refreshCurrentWorkspace() {
@@ -8704,27 +8727,24 @@ async function refreshCurrentWorkspace() {
 }
 
 async function selectWorkspace(id) {
-  if (!state.workspaces.some((item) => item.id === id)) return;
-  if (id === state.activeWorkspaceId) {
-    state.selectedFolders.set(id, "");
-    await renderFiles();
-    setStatus(`已选中 ${current().name} 根目录，新建文件将保存在此。`);
-    return;
-  }
-  if (id !== state.activeWorkspaceId) {
-    if (state.dirty && !confirm("当前文件尚未保存。放弃修改并切换工作区吗？")) return;
-    clearEditor();
-  }
+  const workspace = state.workspaces.find(item => item.id === id);
+  if (!workspace) return false;
+  const granted = await permission(workspace.handle);
+  if (granted) $("workspaceDialog").close();
+  else if (!$("workspaceDialog").open) $("workspaceDialog").showModal();
+  workbench?.capture();
   state.activeWorkspaceId = id;
   state.selectedFolders.set(id, "");
+  workbench?.refresh();
   await persist();
-  const workspace = current();
-  if (workspace && (await permission(workspace.handle))) {
+  if (granted && !state.fileCache.has(id)) {
     setStatus(`正在读取 ${workspace.name}…`);
     await scanWorkspace(workspace);
-    setStatus(`已读取 ${workspace.name}。`);
   }
+  if (state.activeWorkspaceId !== id) return false;
   await render();
+  setStatus(granted ? `已选择 ${workspace.name}。` : `请恢复“${workspace.name}”的目录访问权限。`, !granted);
+  return granted;
 }
 
 async function addWorkspace() {
@@ -8746,11 +8766,11 @@ async function addWorkspace() {
       await selectWorkspace(existing.id);
       return;
     }
-    if (state.dirty && !confirm("当前文件尚未保存。放弃修改并切换到新工作区吗？")) return;
-    clearEditor();
+    workbench?.capture();
     const workspace = { id: makeId(), name: handle.name, handle };
     state.workspaces.push(workspace);
     state.activeWorkspaceId = workspace.id;
+    $("workspaceDialog").close();
     await persist();
     await scanWorkspace(workspace);
     await render();
@@ -8780,8 +8800,8 @@ async function requestAccess(id) {
 async function removeWorkspace(id) {
   const workspace = state.workspaces.find((item) => item.id === id);
   if (!workspace) return;
-  const message = state.activeWorkspaceId === id && state.dirty
-    ? `当前文件尚未保存。放弃修改并从工具中移除“${workspace.name}”吗？本地文件不会删除。`
+  const message = workbench?.dirty(id)
+    ? `此工作区有未保存的标签。放弃这些修改并从工具中移除“${workspace.name}”吗？本地文件不会删除。`
     : `从工具中移除“${workspace.name}”？本地文件不会删除。`;
   if (!confirm(message)) return;
   const result = store.removeWorkspace(
@@ -8789,6 +8809,7 @@ async function removeWorkspace(id) {
     id,
     state.activeWorkspaceId,
   );
+  workbench?.removeWorkspace(id);
   state.workspaces = result.workspaces;
   state.activeWorkspaceId = result.activeId;
   state.fileCache.delete(id);
@@ -8802,15 +8823,11 @@ async function removeWorkspace(id) {
   await render();
 }
 
-async function openFile(workspaceId, entry) {
+async function openFile(workspaceId, entry, force = false) {
   let version;
   try {
-    if (state.dirty && state.active?.workspaceId === workspaceId &&
-      state.active.path === entry.path) return true;
-    if (state.dirty && !confirm("当前文件尚未保存，仍要打开其他文件吗？"))
-      return false;
-    if (!state.dirty && state.active?.workspaceId === workspaceId &&
-      state.active.path === entry.path) return true;
+    workbench?.capture();
+    if (!force && workbench?.restore(workspaceId, entry.path)) return true;
     version = ++state.fileOpenVersion;
     setStatus(`正在打开 ${entry.name}…`);
     updateFileSelection(entry.path, workspaceId);
@@ -8818,6 +8835,7 @@ async function openFile(workspaceId, entry) {
     if (version !== state.fileOpenVersion) return false;
     const { metadata, text, newline } = await decodeAsync(bytes);
     if (version !== state.fileOpenVersion) return false;
+    if (force) workbench?.discard(workspaceId, entry.path);
     state.active = {
       workspaceId,
       ...entry,
@@ -8837,6 +8855,7 @@ async function openFile(workspaceId, entry) {
     markDirty(false);
     updateEditorInfo();
     updateFileSelection();
+    workbench?.opened();
     setStatus(`已打开 ${entry.name}。`);
     return true;
   } catch (error) {
@@ -8848,10 +8867,8 @@ async function openFile(workspaceId, entry) {
 }
 
 function updateFileSelection(path = state.active?.path, workspaceId = state.active?.workspaceId) {
-  for (const row of $("fileList").querySelectorAll(".fileRow")) {
-    row.classList.toggle("active", workspaceId === state.activeWorkspaceId &&
-      row.dataset.path === path);
-  }
+  fileTree.setSelected(item => item.kind === "folder" ? item.selected :
+    workspaceId === state.activeWorkspaceId && item.path === path);
 }
 
 async function newFile() {
@@ -8898,14 +8915,12 @@ function expandedFolders(workspaceId) {
   return state.expandedFolders.get(workspaceId);
 }
 
-function toggleFolderPath(path) {
+function toggleFolderPath(path, select = false) {
   const workspace = current();
   if (!workspace) return;
-  const body = $("fileList");
-  const before = new Map([...body.children].map((row) => [row.dataset.path, row.getBoundingClientRect().top]));
+  if (select) state.selectedFolders.set(workspace.id, path);
   const expanded = expandedFolders(workspace.id);
   const wasOpen = Boolean($("fileSearch").value.trim()) || expanded.has(path);
-  state.selectedFolders.set(workspace.id, path);
   if (wasOpen) expanded.delete(path);
   else expanded.add(path);
   if ($("fileSearch").value) {
@@ -8913,30 +8928,7 @@ function toggleFolderPath(path) {
     clearTimeout(state.fileSearchTimer);
   }
   renderFiles();
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches || body.children.length > 160) return;
-  for (const row of body.children) {
-    const previousTop = before.get(row.dataset.path);
-    if (previousTop === undefined) {
-      row.animate(
-        [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "translateY(0)" }],
-        { duration: 170, easing: "cubic-bezier(.2,.7,.25,1)" },
-      );
-    } else {
-      const delta = previousTop - row.getBoundingClientRect().top;
-      if (Math.abs(delta) > 1)
-        row.animate(
-          [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
-          { duration: 190, easing: "cubic-bezier(.2,.7,.25,1)" },
-        );
-    }
-  }
-  body.querySelectorAll(".folderRow").forEach((row) => {
-    if (row.dataset.path !== path) return;
-    row.querySelector(".treeToggle svg")?.animate(
-      [{ transform: `rotate(${wasOpen ? 90 : 0}deg)` }, { transform: `rotate(${wasOpen ? 0 : 90}deg)` }],
-      { duration: 170, easing: "ease-out" },
-    );
-  });
+  workbench?.refresh();
 }
 
 async function newFolder() {
@@ -8973,8 +8965,11 @@ async function deleteFile(entry) {
     return;
   if (!(await permission(workspace.handle)))
     return setStatus(`“${workspace.name}”尚未获得访问授权。`, true);
+  if (workbench?.dirty(workspace.id, entry.path))
+    return setStatus("此文件有未保存的标签，请先保存或关闭该标签后再删除。", true);
   try {
     await entry.parent.removeEntry(entry.name);
+    workbench?.discard(workspace.id, entry.path);
     if (
       state.active?.workspaceId === workspace.id &&
       state.active.path === entry.path
@@ -9013,10 +9008,82 @@ async function deleteFolder(folder) {
   }
 }
 
+function chooseFolderName(folder) {
+  return new Promise(resolve => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "wb fileDialog";
+    const heading = document.createElement("h2"); heading.textContent = "重命名目录";
+    const location = document.createElement("p"); location.textContent = folder.path;
+    const input = document.createElement("input"); input.value = folder.handle.name;
+    input.setAttribute("aria-label", "新目录名称");
+    const error = document.createElement("p"); error.className = "error"; error.setAttribute("role", "alert");
+    const actions = document.createElement("div"); actions.className = "dialogActions";
+    const cancel = document.createElement("button"); cancel.textContent = "取消";
+    const submit = document.createElement("button"); submit.textContent = "重命名"; submit.className = "primary";
+    cancel.onclick = () => dialog.close();
+    const accept = () => {
+      const result = files.validateFolderName(input.value);
+      if (!result.valid) { error.textContent = result.error; return; }
+      dialog.close(result.name);
+    };
+    submit.onclick = accept;
+    input.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); accept(); } });
+    actions.append(cancel, submit); dialog.append(heading, location, input, error, actions);
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => { const name = dialog.returnValue || null; dialog.remove(); resolve(name); }, { once:true });
+    dialog.showModal(); input.focus(); input.select();
+  });
+}
+
+async function renameFolder(folder) {
+  const workspace = current();
+  if (!workspace || !folder.path || state.busy) return;
+  if (!(await permission(workspace.handle))) return setStatus("请先恢复目录访问权限。", true);
+  const name = await chooseFolderName(folder);
+  if (!name || name === folder.handle.name) return;
+  const parentPath = folder.path.includes("/") ? folder.path.slice(0, folder.path.lastIndexOf("/")) : "";
+  const parent = (state.folderCache.get(workspace.id) || []).find(item => item.path === parentPath);
+  if (!parent) return setStatus("父目录已失效，请刷新后重试。", true);
+  const destination = joinedPath(parentPath, name);
+  state.busy = true; document.querySelector("main").inert = true;
+  workbench?.capture();
+  let moved = false;
+  try {
+    await state.scanning.get(workspace.id);
+    const nestedWorkspaces = [];
+    for (const other of state.workspaces) {
+      if (other.id === workspace.id) continue;
+      const relative = await workspace.handle.resolve(other.handle);
+      if (relative && isWithin(relative.join("/"), folder.path))
+        nestedWorkspaces.push({ other, relative:relative.slice(folder.path.split("/").length) });
+    }
+    setStatus(`正在重命名 ${folder.path}…`);
+    const renamedHandle = await renameDirectory(parent.handle, folder.handle.name, name, count => setStatus(`正在重命名目录，已校验 ${count} 个文件…`));
+    moved = true;
+    state.selectedFolders.set(workspace.id, renamedPath(state.selectedFolders.get(workspace.id) || "", folder.path, destination));
+    state.expandedFolders.set(workspace.id, new Set([...expandedFolders(workspace.id)].map(path => renamedPath(path, folder.path, destination))));
+    await scanWorkspace(workspace);
+    await workbench?.renameFolder(workspace.id, folder.path, destination);
+    for (const { other, relative } of nestedWorkspaces) {
+      let handle = renamedHandle;
+      for (const part of relative) handle = await handle.getDirectoryHandle(part);
+      if (other.name === other.handle.name) other.name = handle.name;
+      other.handle = handle;
+      await scanWorkspace(other);
+      await workbench?.renameFolder(other.id, "", "");
+    }
+    if (nestedWorkspaces.length) await persist();
+    await render();
+    setStatus(`目录已重命名为 ${destination}。`);
+  } catch (error) {
+    setStatus(`${moved ? "目录已重命名，但列表更新失败，请刷新" : "重命名未完成"}：${error.message}`, true);
+  } finally { state.busy = false; document.querySelector("main").inert = false; }
+}
+
 function chooseFileLocation(entry, folders) {
   return new Promise((resolve) => {
     const dialog = document.createElement("dialog");
-    dialog.className = "fileDialog";
+    dialog.className = "wb fileDialog";
     const heading = document.createElement("h2");
     heading.textContent = "重命名或移动文件";
     const nameLabel = document.createElement("label");
@@ -9066,7 +9133,7 @@ async function editFileLocation(entry) {
   const workspace = current();
   if (!workspace || !(await permission(workspace.handle)))
     return setStatus("请先恢复工作区访问权限。", true);
-  if (state.dirty && state.active?.workspaceId === workspace.id && state.active.path === entry.path)
+  if (workbench?.dirty(workspace.id, entry.path))
     return setStatus("请先保存当前文件，再重命名或移动。", true);
   const folders = state.folderCache.get(workspace.id) || [];
   const choice = await chooseFileLocation(entry, folders);
@@ -9082,6 +9149,7 @@ async function editFileLocation(entry) {
   if (targetPath === entry.path) return;
   try {
     await operations.relocateFile(entry, targetFolder.handle, validated.name);
+    workbench?.discard(workspace.id, entry.path);
     await scanWorkspace(workspace);
     const moved = (state.fileCache.get(workspace.id) || []).find((item) => item.path === targetPath);
     if (state.active?.workspaceId === workspace.id && state.active.path === entry.path && moved) {
@@ -9163,9 +9231,18 @@ async function renderWorkspaces() {
   list.replaceChildren(fragment);
 }
 
+const fileTree = UI.createTree({
+  host: $("fileList"),
+  onSelect(item) { if (item.kind === "folder") toggleFolderPath(item.path, true); else openFile(current().id, item.record.entry); },
+  onToggle(item) { toggleFolderPath(item.path); },
+  onAction(item, action) {
+    const record = item.kind === "folder" ? item.record.folder : item.record.entry;
+    if (action === "rename") return item.kind === "folder" ? renameFolder(record) : editFileLocation(record);
+    return item.kind === "folder" ? deleteFolder(record) : deleteFile(record);
+  },
+});
+
 async function renderFiles() {
-  const body = $("fileList");
-  const fragment = document.createDocumentFragment();
   const workspace = current();
   const all = workspace ? state.fileCache.get(workspace.id) || [] : [];
   const folders = workspace ? state.folderCache.get(workspace.id) || [] : [];
@@ -9189,176 +9266,39 @@ async function renderFiles() {
     ? "没有匹配的文件，可选中文件夹后新建。"
     : "选择一个已授权工作区后显示文件。";
   updateSortMenu();
-  for (const node of tree.rows) {
-    const row = document.createElement("div");
-    row.dataset.path = node.path;
-    if (node.kind === "folder") {
-      const searching = Boolean($("fileSearch").value.trim());
-      const isOpen = searching || expandedFolders(workspace.id).has(node.path);
-      row.className = `folderRow${isOpen ? " open" : ""}${node.path === selected?.path ? " selected" : ""}`;
-      row.title = node.path || workspace.name;
-      const content = document.createElement("div");
-      content.className = "treeNameCell";
-      content.style.paddingLeft = `${node.depth * 20}px`;
-      const arrow = document.createElement("button");
-      arrow.className = "treeToggle";
-      arrow.title = searching ? "搜索时自动展开匹配目录" : isOpen ? "收起文件夹" : "展开文件夹";
-      arrow.setAttribute("aria-label", `${arrow.title}：${node.path || workspace.name}`);
-      arrow.setAttribute("aria-expanded", String(isOpen));
-      const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      chevron.setAttribute("viewBox", "0 0 18 18");
-      chevron.setAttribute("aria-hidden", "true");
-      const chevronPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      chevronPath.setAttribute("d", "M6.5 4.5 11.5 9l-5 4.5");
-      chevron.append(chevronPath);
-      arrow.append(chevron);
-      arrow.addEventListener("click", (event) => {
-        event.stopPropagation();
-        toggleFolderPath(node.path);
-      });
-      const pick = document.createElement("button");
-      pick.className = "folderPick";
-      pick.textContent = node.path ? node.path.split("/").pop() : workspace.name;
-      pick.title = `${isOpen ? "收起" : "展开"} ${node.path || workspace.name}，并选为新建位置`;
-      pick.addEventListener("click", (event) => {
-        event.stopPropagation();
-        toggleFolderPath(node.path);
-      });
-      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      icon.setAttribute("viewBox", "0 0 20 20");
-      icon.setAttribute("aria-hidden", "true");
-      icon.classList.add("folderIcon");
-      const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      shape.setAttribute("d", "M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z");
-      icon.append(shape);
-      row.addEventListener("click", () => toggleFolderPath(node.path));
-      content.append(arrow, icon, pick);
-      if (node.folder.empty) {
-        const remove = document.createElement("button");
-        remove.className = "fileDelete folderDelete";
-        remove.title = `删除空目录 ${node.path}`;
-        remove.setAttribute("aria-label", remove.title);
-        remove.textContent = "×";
-        remove.addEventListener("click", (event) => {
-          event.stopPropagation();
-          deleteFolder(node.folder);
-        });
-        content.append(remove);
-      }
-      row.append(content);
-      fragment.append(row);
-      continue;
-    }
-    const entry = node.entry;
-    row.className = `fileRow${node.depth ? " nested" : ""}${state.active?.handle === entry.handle ? " active" : ""}`;
-    row.style.setProperty("--tree-depth", node.depth);
-    row.title = entry.path;
-    row.addEventListener("click", () => openFile(workspace.id, entry));
-    const content = document.createElement("div");
-    content.className = "fileNameCell";
-    content.style.paddingLeft = `${node.depth * 20 + 22}px`;
-    const icon = document.createElement("span");
-    icon.className = "fileIcon";
-    icon.textContent = "▤";
-    const label = document.createElement("span");
-    label.className = "fileNameText";
-    label.textContent = entry.name;
-    const editLocation = document.createElement("button");
-    editLocation.className = "fileAction";
-    editLocation.title = `重命名或移动 ${entry.path}`;
-    editLocation.setAttribute("aria-label", editLocation.title);
-    editLocation.textContent = "⋯";
-    editLocation.addEventListener("click", (event) => {
-      event.stopPropagation();
-      editFileLocation(entry);
-    });
-    const remove = document.createElement("button");
-    remove.className = "fileDelete";
-    remove.title = `删除 ${entry.path}`;
-    remove.setAttribute("aria-label", remove.title);
-    remove.textContent = "×";
-    remove.addEventListener("click", (event) => {
-      event.stopPropagation();
-      deleteFile(entry);
-    });
-    content.append(icon, label);
-    const actions = document.createElement("div");
-    actions.className = "fileRowActions";
-    actions.append(editLocation, remove);
-    const meta = document.createElement("div");
-    meta.className = "fileMeta";
-    meta.style.paddingLeft = `${node.depth * 20 + 40}px`;
-    meta.textContent = `${files.formatFileTime(entry.modified)} · ${entry.extension.toUpperCase()}`;
-    row.append(content, meta, actions);
-    fragment.append(row);
-  }
-  body.replaceChildren(fragment);
+  fileTree.update(tree.rows.map(node => ({
+    key: node.kind + ":" + node.path, path: node.path, kind: node.kind, depth: node.depth,
+    label: node.kind === "folder" ? (node.path.split("/").pop() || workspace.name) : node.entry.name,
+    title: node.path || workspace.name,
+    selected: node.kind === "folder" ? node.path === selected?.path : state.active?.handle === node.entry.handle,
+    expanded: node.kind === "folder" && (Boolean($("fileSearch").value.trim()) || expandedFolders(workspace.id).has(node.path)),
+    meta: node.kind === "file" ? `${files.formatFileTime(node.entry.modified)} · ${node.entry.extension.toUpperCase()}` : undefined,
+    badges: node.kind === "folder" ? [
+      ...(node.counts.folders ? [{ text: String(node.counts.folders), icon: "folder", title: `${node.counts.folders} 个直属子目录` }] : []),
+      ...(node.counts.files ? [{ text: String(node.counts.files), icon: "file", title: `${node.counts.files} 个直属 SQL、TXT、MD 文件` }] : []),
+      ...(!node.counts.folders && !node.counts.files ? [{ text: "空", title: "没有直属子目录或 SQL、TXT、MD 文件" }] : []),
+    ] : [],
+    actions: [
+      { id: "rename", label: "⋯", title: node.kind === "folder" ? `重命名目录 ${node.path}` : `重命名或移动 ${node.path}` },
+      { id: "delete", label: "×", title: node.kind === "folder" ? `删除空目录 ${node.path}` : `删除 ${node.path}`, danger: true, disabled: node.kind === "folder" && !node.folder.empty },
+    ],
+    record: node,
+  })));
+
 }
 
 function updateSortMenu() {
   const labels = { modified: "修改时间", name: "文件名", extension: "格式" };
-  $("fileSortButton").title = `排序：${labels[state.fileSort.key]}${state.fileSort.direction === "asc" ? "升序" : "降序"}`;
+  const direction = state.fileSort.direction === "asc" ? "升序" : "降序";
+  $("fileSortButton").textContent = `${labels[state.fileSort.key]} ${state.fileSort.direction === "asc" ? "↑" : "↓"} ▾`;
+  $("fileSortButton").title = `排序：${labels[state.fileSort.key]}，${direction}`;
+  $("fileSortButton").setAttribute("aria-label", $("fileSortButton").title);
   $("fileSortDirection").textContent = state.fileSort.direction === "asc" ? "升序 ↑" : "降序 ↓";
   document.querySelectorAll("[data-sort-key]").forEach((button) => {
     const selected = button.dataset.sortKey === state.fileSort.key;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
-}
-
-async function renderGlobalSearch() {
-  const query = $("globalSearch").value.trim();
-  const target = $("globalResults");
-  target.replaceChildren();
-  if (!query) return;
-  setStatus("正在搜索所有已授权工作区…");
-  const term = query.toLocaleLowerCase();
-  const results = [];
-  for (const workspace of state.workspaces) {
-    let entries = state.fileCache.get(workspace.id);
-    if (!entries && (await permission(workspace.handle)))
-      entries = await scanWorkspace(workspace);
-    for (const entry of entries || []) {
-      let match = `${entry.name} ${entry.path}`
-        .toLocaleLowerCase()
-        .includes(term);
-      if (!match) {
-        try {
-          const raw = new Uint8Array(
-            await (await entry.handle.getFile()).arrayBuffer(),
-          );
-          match = codec
-            .decodeFileBytes(raw, codec.detectEncoding(raw))
-            .toLocaleLowerCase()
-            .includes(term);
-        } catch (_) {}
-      }
-      if (match) results.push({ workspace, entry });
-      if (results.length >= 80) break;
-    }
-    if (results.length >= 80) break;
-  }
-  for (const { workspace, entry } of results) {
-    const button = document.createElement("button");
-    button.className = "result";
-    const title = document.createElement("strong");
-    title.textContent = entry.name;
-    const location = document.createElement("small");
-    location.textContent = `${workspace.name} / ${entry.path}`;
-    button.append(title, location);
-    button.addEventListener("click", async () => {
-      if (!(await openFile(workspace.id, entry))) return;
-      if (state.activeWorkspaceId !== workspace.id) {
-        state.activeWorkspaceId = workspace.id;
-        await persist();
-      }
-      await render();
-    });
-    target.append(button);
-  }
-  if (!results.length)
-    target.innerHTML = '<div class="placeholder">没有找到匹配内容。</div>';
-  setStatus(`找到 ${results.length} 个匹配文件。`);
 }
 
 function saveBytes() {
@@ -9397,6 +9337,7 @@ async function writeTo(handle, parent, { backup, expectedBytes, name, path, payl
   state.editorHistory.current = editorSnapshot();
   setFileIdentity(name, `${owner.name} / ${path}`);
   markDirty(false);
+  workbench?.opened();
   await scanWorkspace(owner);
   await renderFiles();
   renderEditorDecorations();
@@ -9405,7 +9346,7 @@ async function writeTo(handle, parent, { backup, expectedBytes, name, path, payl
 function showConflict(diskBytes) {
   return new Promise((resolve) => {
     const dialog = document.createElement("dialog");
-    dialog.className = "fileDialog conflictDialog";
+    dialog.className = "wb fileDialog conflictDialog";
     const heading = document.createElement("h2");
     heading.textContent = "磁盘文件已有新修改";
     const description = document.createElement("p");
@@ -9450,6 +9391,17 @@ function showConflict(diskBytes) {
   });
 }
 
+async function runWrite(action) {
+  if (state.busy || !state.active) return;
+  state.busy = true;
+  document.querySelector('main').inert = true;
+  try { await action(); }
+  finally {
+    state.busy = false;
+    document.querySelector('main').inert = false;
+    workbench?.capture(); workbench?.sync();
+  }
+}
 async function save() {
   try {
     if (!state.active) return;
@@ -9466,9 +9418,9 @@ async function save() {
         const choice = await showConflict(error.diskBytes);
         if (choice === "saveAs") return saveAs();
         if (choice === "reload") {
-          markDirty(false);
-          await openFile(state.active.workspaceId, state.active);
-          return setStatus("已重新加载磁盘版本。");
+          if (await openFile(state.active.workspaceId, state.active, true))
+            setStatus("已重新加载磁盘版本。");
+          return;
         }
         if (choice !== "overwrite") return setStatus("已取消保存；当前编辑内容仍在。", true);
         expected = error.diskBytes;
@@ -9490,6 +9442,8 @@ async function saveAs() {
   const validated = files.validateNewFileName(name);
   if (!validated.valid) return setStatus(validated.error, true);
   try {
+    if (validated.name !== state.active.path && workbench?.has(owner.id, validated.name))
+      return setStatus("目标文件已在另一标签打开，请先关闭目标标签后再另存。", true);
     const payload = saveBytes();
     const existing = await operations.findFile(owner.handle, validated.name);
     if (existing && await existing.isSameEntry(state.active.handle)) return save();
@@ -9519,51 +9473,10 @@ function changeEncoding() {
   updateEditorInfo();
 }
 
-function renderEditorDecorations() {
-  clearTimeout(state.editorDecorationTimer);
-  const editor = $("editor");
-  const text = editor.value;
-  const shell = editor.parentElement;
-  shell.classList.remove("editing");
-  if (text.length > MAX_HIGHLIGHT_CHARS) {
-    shell.classList.add("plainEditor");
-    $("lineNumberContent").textContent = "";
-    $("highlightCode").textContent = "";
-    state.editorWindowCache = null;
-    return;
-  }
-  shell.classList.remove("plainEditor");
-  renderEditorWindow(true);
-}
-function renderEditorWindow(force = false) {
-  const editor = $("editor");
-  if (editor.parentElement.classList.contains("plainEditor") ||
-    editor.parentElement.classList.contains("editing")) return;
-  const text = editor.value;
-  let cache = state.editorWindowCache;
-  if (!cache || cache.text !== text) {
-    cache = state.editorWindowCache = { text, starts: lineStarts(text) };
-  }
-  const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
-  const view = editorWindow(cache.starts, text.length, editor.scrollTop, editor.clientHeight, lineHeight);
-  const code = $("highlightCode");
-  const numbers = $("lineNumberContent");
-  if (force || cache.first !== view.first || cache.last !== view.last) {
-    code.innerHTML = state.active?.extension === "sql"
-      ? highlightSql(text, view) : escapeHtml(text.slice(view.start, view.end));
-    numbers.textContent = Array.from({ length: view.last - view.first }, (_, i) => view.first + i + 1).join("\n");
-    cache.first = view.first;
-    cache.last = view.last;
-  }
-  const y = view.first * lineHeight - editor.scrollTop;
-  code.style.transform = `translate(${-editor.scrollLeft}px, ${y}px)`;
-  numbers.style.transform = `translateY(${y}px)`;
-}
-function scheduleEditorDecorations() {
-  $("editor").parentElement.classList.add("editing");
-  clearTimeout(state.editorDecorationTimer);
-  state.editorDecorationTimer = setTimeout(renderEditorDecorations, 140);
-}
+let editorSurface;
+function renderEditorDecorations() { editorSurface.refresh(); }
+function scheduleEditorDecorations() { editorSurface.schedule(); }
+
 function clearSecondaryCursors() {
   state.altDrag = null;
   state.secondaryCursors = [];
@@ -9693,9 +9606,7 @@ function editorSnapshot() {
   };
 }
 function resetEditorHistory() {
-  state.editorHistory.undo = [];
-  state.editorHistory.redo = [];
-  state.editorHistory.current = editorSnapshot();
+  state.editorHistory = { undo: [], redo: [], current: editorSnapshot(), restoring: false };
 }
 function rememberEditorInput() {
   const history = state.editorHistory;
@@ -9759,98 +9670,34 @@ function moveCursor(value, position, key) {
   return position;
 }
 function setupEditorChrome() {
-  const editor = $("editor");
-  const shell = document.createElement("div");
-  shell.className = "editorShell";
-  const lines = document.createElement("pre");
-  lines.id = "lineNumbers";
-  lines.className = "lineNumbers";
-  const numberContent = document.createElement("div");
-  numberContent.id = "lineNumberContent";
-  lines.append(numberContent);
-  const highlight = document.createElement("pre");
-  highlight.id = "highlight";
-  highlight.className = "highlight";
-  const code = document.createElement("code");
-  code.id = "highlightCode";
-  highlight.append(code);
-  const cursors = document.createElement("div");
-  cursors.id = "secondaryCursors";
-  cursors.className = "secondaryCursors";
-  editor.parentElement.insertBefore(shell, editor);
-  shell.append(lines, highlight, editor, cursors);
-  editor.addEventListener("scroll", () => {
-    renderEditorWindow();
-    renderSecondaryCursors();
+  editorSurface = UI.createEditorSurface({
+    editor: $("editor"), maxDecoratedChars: MAX_HIGHLIGHT_CHARS, getLines: editorLines,
+    ids: { lines: "lineNumbers", numbers: "lineNumberContent", highlight: "highlight", code: "highlightCode", cursors: "secondaryCursors" },
+    onScroll: renderSecondaryCursors,
+    decorate(text, view) {
+      const fragment = document.createDocumentFragment();
+      if (state.active?.extension === "sql") {
+        // highlightSql escapes every source fragment; HTML is generated only by this trusted renderer.
+        const template = document.createElement("template");
+        template.innerHTML = highlightSql(text, view);
+        fragment.append(template.content);
+      } else fragment.append(document.createTextNode(text.slice(view.start, view.end)));
+      return fragment;
+    },
   });
-  new ResizeObserver(() => {
-    renderEditorWindow();
-    renderSecondaryCursors();
-  }).observe(editor);
-  renderEditorDecorations();
-}
-function setupResizers() {
-  const layout = document.querySelector(".layout");
-  const firstPanel = layout.children[0];
-  const secondPanel = layout.children[1];
-  const left = document.createElement("div");
-  const middle = document.createElement("div");
-  left.className = middle.className = "resizer";
-  left.setAttribute("aria-label", "调整工作区宽度");
-  middle.setAttribute("aria-label", "调整文件列表宽度");
-  layout.insertBefore(left, secondPanel);
-  layout.insertBefore(middle, secondPanel.nextSibling);
-  const bind = (bar, variable, minimum) =>
-    bar.addEventListener("pointerdown", (event) => {
-      const start = event.clientX;
-      const initial = parseInt(
-        getComputedStyle(document.documentElement).getPropertyValue(variable),
-        10,
-      );
-      bar.classList.add("dragging");
-      bar.setPointerCapture(event.pointerId);
-      const move = (next) => {
-        const value = Math.max(
-          minimum,
-          Math.min(initial + next.clientX - start, window.innerWidth - 430),
-        );
-        document.documentElement.style.setProperty(variable, `${value}px`);
-      };
-      const end = async () => {
-        bar.classList.remove("dragging");
-        bar.removeEventListener("pointermove", move);
-        bar.removeEventListener("pointerup", end);
-        await put("layout", {
-          workspace: getComputedStyle(document.documentElement)
-            .getPropertyValue("--workspace-width")
-            .trim(),
-          files: getComputedStyle(document.documentElement)
-            .getPropertyValue("--files-width")
-            .trim(),
-        });
-      };
-      bar.addEventListener("pointermove", move);
-      bar.addEventListener("pointerup", end);
-    });
-  bind(left, "--workspace-width", 180);
-  bind(middle, "--files-width", 260);
 }
 
 async function render() {
   await renderWorkspaces();
   await renderFiles();
+  workbench?.refresh();
 }
 async function init() {
   setupEditorChrome();
-  setupResizers();
-  const layout = await get("layout");
-  if (layout?.workspace)
-    document.documentElement.style.setProperty(
-      "--workspace-width",
-      layout.workspace,
-    );
-  if (layout?.files)
-    document.documentElement.style.setProperty("--files-width", layout.files);
+  workbench = setupWorkbench({ state, $, get, put, openFile, renderFiles, render,
+    updateEditorInfo, setFileIdentity, renderEditorDecorations, updateFileSelection,
+    clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, editorLines, requestAccess });
+  await workbench.ready;
   state.workspaces = store.normalizeWorkspaces(await get("workspaces"));
   if (!state.workspaces.length) {
     const legacy = await get("workspace");
@@ -9875,16 +9722,11 @@ async function init() {
       : "准备就绪。",
   );
 }
-$("fileSortButton").addEventListener("click", (event) => {
-  event.stopPropagation();
-  const menu = $("fileSortMenu");
-  menu.hidden = !menu.hidden;
-  $("fileSortButton").setAttribute("aria-expanded", String(!menu.hidden));
-});
+const sortPopover = UI.createPopover({ trigger: $("fileSortButton"), menu: $("fileSortMenu"), onOpen: updateSortMenu });
 document.querySelectorAll("[data-sort-key]").forEach((button) =>
   button.addEventListener("click", () => {
     state.fileSort.key = button.dataset.sortKey;
-    $("fileSortMenu").hidden = true;
+    sortPopover.close();
     $("fileSortButton").setAttribute("aria-expanded", "false");
     renderFiles();
   }),
@@ -9892,12 +9734,6 @@ document.querySelectorAll("[data-sort-key]").forEach((button) =>
 $("fileSortDirection").addEventListener("click", () => {
   state.fileSort.direction = state.fileSort.direction === "asc" ? "desc" : "asc";
   renderFiles();
-});
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".sortControl")) {
-    $("fileSortMenu").hidden = true;
-    $("fileSortButton").setAttribute("aria-expanded", "false");
-  }
 });
 $("addWorkspace").addEventListener("click", addWorkspace);
 $("refreshFiles").addEventListener("click", refreshCurrentWorkspace);
@@ -9907,13 +9743,8 @@ $("fileSearch").addEventListener("input", () => {
   clearTimeout(state.fileSearchTimer);
   state.fileSearchTimer = setTimeout(renderFiles, 120);
 });
-$("globalSearch").addEventListener("input", () => {
-  clearTimeout(state.globalTimer);
-  state.globalTimer = setTimeout(renderGlobalSearch, 250);
-});
 $("editor").addEventListener("input", () => {
   state.fileOpenVersion += 1;
-  updateFileSelection();
   rememberEditorInput();
   markDirty(true);
   scheduleEditorDecorations();
@@ -10053,17 +9884,50 @@ $("editor").addEventListener("keydown", (event) => {
   editor.setSelectionRange(change.selectionStart, change.selectionEnd, direction);
   editor.dispatchEvent(new Event("input", { bubbles: true }));
 });
+function closeEncodingMenu(restoreFocus = false) {
+  $("encodingMenu").hidePopover();
+  $("encodingButton").setAttribute("aria-expanded", "false");
+  if (restoreFocus) $("encodingButton").focus();
+}
+function updateEncodingMenu() {
+  const select = $("encodingSelect");
+  const label = select.selectedOptions[0]?.textContent || select.value;
+  $("encodingButton").textContent = `${label} ▾`;
+  $("encodingButton").setAttribute("aria-label", `保存编码：${label}`);
+  for (const option of $("encodingMenu").children) {
+    const selected = option.dataset.encoding === select.value;
+    option.classList.toggle("selected", selected);
+    option.setAttribute("aria-checked", String(selected));
+  }
+}
+for (const option of $("encodingSelect").options) {
+  const button = document.createElement("button");
+  button.textContent = option.textContent;
+  button.dataset.encoding = option.value;
+  button.setAttribute("role", "menuitemradio");
+  button.tabIndex = -1;
+  button.addEventListener("click", () => {
+    if (!state.active || $("encodingButton").disabled) return;
+    if ($("encodingSelect").value !== option.value) {
+      $("encodingSelect").value = option.value;
+      changeEncoding();
+    }
+    closeEncodingMenu(true);
+  });
+  $("encodingMenu").append(button);
+}
+const encodingPopover = UI.createPopover({ trigger: $("encodingButton"), menu: $("encodingMenu"), onOpen: updateEncodingMenu });
 $("encodingSelect").addEventListener("change", changeEncoding);
-$("save").addEventListener("click", save);
-$("saveAs").addEventListener("click", saveAs);
+$("save").addEventListener("click", () => runWrite(save));
+$("saveAs").addEventListener("click", () => runWrite(saveAs));
 window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    save();
+    runWrite(save);
   }
 });
 window.addEventListener("beforeunload", (event) => {
-  if (state.dirty) {
+  if (state.dirty || workbench?.dirty()) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -10072,7 +9936,7 @@ if ("serviceWorker" in navigator)
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 init();
 
-},{"./async-codec":42,"./codec":43,"./editor-indent":44,"./editor-window":45,"./file-model":46,"./file-operations":47,"./highlight":48,"./multi-cursor":49,"./workspace-store":50}],42:[function(require,module,exports){
+},{"../vendor/workbench/workbench":55,"./async-codec":42,"./codec":43,"./editor-indent":44,"./file-model":46,"./file-operations":47,"./folder-operations":48,"./highlight":49,"./multi-cursor":50,"./workbench":51,"./workspace-store":52}],42:[function(require,module,exports){
 const codec = require("./codec");
 let worker;
 let sequence = 0;
@@ -10084,7 +9948,7 @@ function decodeAsync(bytes) {
     return Promise.resolve({ metadata, text, newline: codec.detectNewline(text) });
   }
   if (!worker) {
-    worker = new Worker("./codec-worker.js?v=22");
+    worker = new Worker("./codec-worker.js?v=36");
     worker.onmessage = ({ data }) => {
       const task = pending.get(data.id);
       if (!task) return;
@@ -10241,65 +10105,14 @@ module.exports = {
 
 }).call(this)}).call(this,require("buffer").Buffer)
 },{"buffer":3,"chardet":11,"iconv-lite":34}],44:[function(require,module,exports){
-const INDENT = "\t";
+// Shared implementation; application compatibility entry.
+module.exports = require("../vendor/workbench/editor-indent");
 
-function editIndent(value, start, end, outdent = false) {
-  if (!outdent && start === end) {
-    return {
-      replaceStart: start,
-      replaceEnd: end,
-      replacement: INDENT,
-      selectionStart: start + INDENT.length,
-      selectionEnd: start + INDENT.length,
-    };
-  }
+},{"../vendor/workbench/editor-indent":53}],45:[function(require,module,exports){
+const { lineStarts, editorWindow, cursorPosition } = require("../vendor/workbench/workbench");
+module.exports = { lineStarts, editorWindow, cursorPosition };
 
-  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-  const lastSelected = end > start && value[end - 1] === "\n" ? end - 1 : end;
-  const nextLine = value.indexOf("\n", lastSelected);
-  const lineEnd = nextLine < 0 ? value.length : nextLine;
-  const lines = value.slice(lineStart, lineEnd).split("\n");
-  const changes = [];
-  const replacement = lines.map((line) => {
-    if (!outdent) {
-      changes.push(INDENT.length);
-      return INDENT + line;
-    }
-    const leading = line.match(/^(?:\t| {1,2})/);
-    const removed = leading ? leading[0].length : 0;
-    changes.push(-removed);
-    return line.slice(removed);
-  }).join("\n");
-  if (changes.every((change) => change === 0)) return null;
-
-  const firstStart = Math.max(lineStart, start + changes[0]);
-  const totalChange = changes.reduce((sum, change) => sum + change, 0);
-  return {
-    replaceStart: lineStart,
-    replaceEnd: lineEnd,
-    replacement,
-    selectionStart: firstStart,
-    selectionEnd: end === start ? firstStart : end + totalChange,
-  };
-}
-
-module.exports = { editIndent };
-
-},{}],45:[function(require,module,exports){
-function lineStarts(text) {
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) if (text[i] === "\n") starts.push(i + 1);
-  return starts;
-}
-function editorWindow(starts, length, scrollTop, height, lineHeight) {
-  const visible = Math.min(starts.length - 1, Math.max(0, Math.floor((scrollTop - 22) / lineHeight)));
-  const first = Math.max(0, visible - 12);
-  const last = Math.min(starts.length, visible + Math.ceil(height / lineHeight) + 13);
-  return { first, last, start: starts[first], end: starts[last] ?? length };
-}
-module.exports = { lineStarts, editorWindow };
-
-},{}],46:[function(require,module,exports){
+},{"../vendor/workbench/workbench":55}],46:[function(require,module,exports){
 function filterFiles(
   files,
   query,
@@ -10349,6 +10162,13 @@ function buildFileTree(folders, entries, options = {}) {
     const slash = path.lastIndexOf("/");
     return slash < 0 ? "" : path.slice(0, slash);
   };
+  const counts = new Map(folders.map(folder => [folder.path, { folders: 0, files: 0 }]));
+  for (const folder of folders) {
+    if (folder.path && counts.has(parentPath(folder.path))) counts.get(parentPath(folder.path)).folders++;
+  }
+  for (const entry of entries) {
+    if (counts.has(parentPath(entry.path))) counts.get(parentPath(entry.path)).files++;
+  }
   const paths = new Set(folders.map((folder) => folder.path));
   const scope = paths.has(options.scope) ? options.scope : "";
   const withinScope = (path) =>
@@ -10399,7 +10219,7 @@ function buildFileTree(folders, entries, options = {}) {
   const expanded = new Set(options.expanded || [""]);
   const rows = [];
   function visit(folder, depth) {
-    rows.push({ kind: "folder", path: folder.path, depth, folder });
+    rows.push({ kind: "folder", path: folder.path, depth, folder, counts: counts.get(folder.path) || { folders: 0, files: 0 } });
     if (!query && !expanded.has(folder.path)) return;
     for (const child of folderChildren.get(folder.path) || []) visit(child, depth + 1);
     for (const entry of fileChildren.get(folder.path) || [])
@@ -10437,7 +10257,8 @@ function validateNewFileName(value) {
 
 function validateFolderName(value) {
   const name = String(value || "").trim();
-  if (!name || name === "." || name === ".." || /[\\/:*?"<>|]/.test(name))
+  if (!name || name === "." || name === ".." || /[\\/:*?"<>|\x00-\x1f]/.test(name) ||
+    name.endsWith(".") || /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(name))
     return { valid: false, error: "目录名不能为空，且不能包含路径或文件系统保留字符。" };
   return { valid: true, name };
 }
@@ -10494,6 +10315,83 @@ async function removeEmptyDirectory(folder, parent, name) {
 module.exports = { readBytes, sameBytes, writeBytes, findFile, relocateFile, removeEmptyDirectory };
 
 },{}],48:[function(require,module,exports){
+const { readBytes, writeBytes, sameBytes } = require('./file-operations');
+const { validateFolderName } = require('./file-model');
+
+// A sibling-only rename inside an already-authorized directory. No recursive delete.
+async function renameDirectory(parent, oldName, newName, progress = () => {}) {
+  const validated = validateFolderName(newName);
+  if (!validated.valid) throw new Error(validated.error);
+  newName = validated.name;
+  if (oldName === newName) return parent.getDirectoryHandle(oldName);
+  const source = await parent.getDirectoryHandle(oldName);
+  for await (const [name] of parent.entries()) {
+    if (name.toLocaleLowerCase() === newName.toLocaleLowerCase())
+      throw new Error(`“${newName}”已存在，不能覆盖。`);
+  }
+  let targetCreated = false;
+  const records = [];
+  const folders = [];
+  try {
+    const destination = await parent.getDirectoryHandle(newName, { create: true });
+    targetCreated = true;
+    for await (const _ of destination.values()) throw new Error('目标目录已被占用。');
+    async function copy(from, to, owner, name, path) {
+      folders.push({from, to, owner, name, path});
+      for await (const [childName, handle] of from.entries()) {
+        const childPath = path ? `${path}/${childName}` : childName;
+        if (handle.kind === 'directory') {
+          const child = await to.getDirectoryHandle(childName, { create: true });
+          await copy(handle, child, from, childName, childPath);
+        } else {
+          const bytes = await readBytes(handle);
+          const target = await to.getFileHandle(childName, { create: true });
+          if ((await readBytes(target)).length) throw new Error('目标文件在复制期间出现。');
+          await writeBytes(target, bytes);
+          if (!sameBytes(bytes, await readBytes(target))) throw new Error(`复制校验失败：${childPath}`);
+          records.push({ source:handle, target, parent:from, name:childName, path:childPath });
+          progress(records.length);
+        }
+      }
+    }
+    await copy(source, destination, parent, oldName, '');
+    // Check every original against its verified copy before removing anything.
+    for (const record of records) {
+      if (!sameBytes(await readBytes(record.source), await readBytes(record.target)))
+        throw new Error(`原文件在复制期间发生变化：${record.path}`);
+    }
+    const copiedPaths = new Set([...records.map(r=>`f:${r.path}`), ...folders.slice(1).map(r=>`d:${r.path}`)]);
+    async function checkInventory(dir, path = '') {
+      for await (const [name, handle] of dir.entries()) {
+        const relative = path ? `${path}/${name}` : name;
+        if (!copiedPaths.has(`${handle.kind === 'directory' ? 'd' : 'f'}:${relative}`))
+          throw new Error(`原目录在复制期间出现新内容：${relative}`);
+        if (handle.kind === 'directory') await checkInventory(handle, relative);
+      }
+    }
+    await checkInventory(source);
+    // Recheck each pair immediately before removing that original. New/changed content is retained.
+    for (const record of records) {
+      if (!sameBytes(await readBytes(record.source), await readBytes(record.target)))
+        throw new Error(`原文件在迁移期间发生变化：${record.path}`);
+      await record.parent.removeEntry(record.name);
+    }
+    for (const folder of folders.reverse()) {
+      for await (const _ of folder.from.values()) throw new Error('原目录出现了新内容，已停止迁移。');
+      await folder.owner.removeEntry(folder.name, { recursive: false });
+    }
+    return destination;
+  } catch (error) {
+    if (targetCreated) error.message += `。操作已停止，请保留并检查“${oldName}”与“${newName}”两处内容。`;
+    throw error;
+  }
+}
+
+const isWithin = (path, folder) => path === folder || path.startsWith(`${folder}/`);
+const renamedPath = (path, from, to) => isWithin(path, from) ? to + path.slice(from.length) : path;
+module.exports = { renameDirectory, isWithin, renamedPath };
+
+},{"./file-model":46,"./file-operations":47}],49:[function(require,module,exports){
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, "&amp;")
@@ -10529,7 +10427,446 @@ function highlightSql(text, { start = 0, end: limit = text.length } = {}) {
 
 module.exports = { escapeHtml, highlightSql };
 
-},{}],49:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
+// Shared implementation; application compatibility entry.
+module.exports = require("../vendor/workbench/multi-cursor");
+
+},{"../vendor/workbench/multi-cursor":54}],51:[function(require,module,exports){
+const UI = require("../vendor/workbench/workbench");
+const { cursorPosition } = require('./editor-window');
+const { isWithin, renamedPath } = require('./folder-operations');
+const keyOf = (file) => JSON.stringify([file.workspaceId, file.path]);
+
+module.exports = function setupWorkbench(api) {
+  const { state, $, get, put, openFile, renderFiles, updateEditorInfo,
+    setFileIdentity, renderEditorDecorations, updateFileSelection,
+    clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, editorLines } = api;
+  const tabs = [];
+  const closed = [];
+  let recent = [], favorites = [], view = 'files';
+  let indexSignature = '', searchLoading = false;
+  const editor = $('editor');
+  const { node, button } = UI;
+  const activeTab = () => tabs.find(tab => tab.file === state.active);
+  const tabView = UI.createTabs({
+    host: $('editorTabs'),
+    onSelect(key) { const tab = tabs.find(item => keyOf(item.file) === key); if (tab) activate(tab); },
+    onClose(key) { const tab = tabs.find(item => keyOf(item.file) === key); if (tab) closeTab(tab); },
+    onReorder(key, index) {
+      const from = tabs.findIndex(item => keyOf(item.file) === key);
+      if (from < 0) return;
+      const [moving] = tabs.splice(from, 1); tabs.splice(index, 0, moving); renderTabs();
+      setStatus(`已移动标签：${moving.file.name}（第 ${index + 1} / ${tabs.length} 个）`);
+    },
+  });
+  function capture() {
+    const tab = activeTab();
+    if (!tab) return;
+    Object.assign(tab, { text: editor.value, dirty: state.dirty,
+      start: editor.selectionStart, end: editor.selectionEnd,
+      top: editor.scrollTop, left: editor.scrollLeft, history: state.editorHistory });
+  }
+  function updateLocation() {
+    const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+    const path = workspace && state.selectedFolders.get(workspace.id);
+    const text = workspace ? `当前目录：${workspace.name}${path ? ' / ' + path : ''}` : '尚未选择本地目录';
+    $('workspaceLocation').textContent = text;
+    $('workspaceLocation').title = text;
+  }
+  function selectFileDirectory(file) {
+    const slash = file.path.lastIndexOf('/');
+    const path = slash < 0 ? '' : file.path.slice(0, slash);
+    const changed = (state.selectedFolders.get(file.workspaceId) || '') !== path;
+    state.selectedFolders.set(file.workspaceId, path);
+    return changed;
+  }
+  function sync() {
+    updateLocation();
+    const tab = activeTab();
+    if (tab) tab.dirty = state.dirty;
+    renderTabs();
+    $('saveState').textContent = state.active ? (state.dirty ? '未保存' : '已保存') : '本地文件 · 离线可用';
+    $('saveState').classList.toggle('unsaved', state.dirty);
+    $('emptyEditor').hidden = Boolean(state.active);
+    if (!state.active) $('findBar').hidden = true;
+    $('favoriteFile').disabled = !state.active;
+    $('favoriteFile').textContent = state.active && favorites.some(item => keyOf(item) === keyOf(state.active)) ? '★ 已收藏' : '☆ 收藏';
+    cursorStatus();
+  }
+  function renderTabs() {
+    tabView.update(tabs.map(tab => ({
+      key: keyOf(tab.file), label: tab.file.name, dirty: tab.dirty, selected: tab.file === state.active,
+      title: `${state.workspaces.find(w => w.id === tab.file.workspaceId)?.name || ''} / ${tab.file.path}${tab.dirty ? ' · 未保存' : ''} · 双击关闭，拖动排序`,
+    })));
+  }
+  function activate(tab) {
+    if (tab.file === state.active && state.activeWorkspaceId === tab.file.workspaceId) {
+      if (selectFileDirectory(tab.file)) renderFiles();
+      updateLocation();
+      setStatus(`已打开 ${tab.file.name}。`);
+      return;
+    }
+    const workspaceChanged = state.activeWorkspaceId !== tab.file.workspaceId;
+    const directoryChanged = selectFileDirectory(tab.file);
+    capture();
+    state.fileOpenVersion++;
+    state.active = tab.file;
+    state.activeWorkspaceId = tab.file.workspaceId;
+    state.dirty = tab.dirty;
+    clearSecondaryCursors();
+    editor.value = tab.text;
+    editor.disabled = false;
+    state.editorHistory = tab.history;
+    editor.setSelectionRange(tab.start, tab.end);
+    renderEditorDecorations();
+    editor.scrollTop = tab.top; editor.scrollLeft = tab.left;
+    const workspace = state.workspaces.find(w => w.id === tab.file.workspaceId);
+    setFileIdentity(tab.file.name, `${workspace?.name || ''} / ${tab.file.path}`);
+    updateEditorInfo(); updateFileSelection(); sync();
+    if (workspaceChanged) {
+      api.render();
+      put('activeWorkspaceId', state.activeWorkspaceId);
+    } else if (directoryChanged) renderFiles();
+    setStatus(`已打开 ${tab.file.name}。`);
+  }
+  function opened() {
+    if (selectFileDirectory(state.active)) renderFiles();
+    let tab = activeTab();
+    if (!tab) { tab = { file: state.active }; tabs.push(tab); }
+    capture(); sync();
+    const file = { workspaceId: state.active.workspaceId, path: state.active.path, name: state.active.name };
+    recent = [file, ...recent.filter(item => keyOf(item) !== keyOf(file))].slice(0, 40);
+    put('recentFiles', recent); renderCollection();
+  }
+  function closeTab(tab) {
+    if (!tabs.includes(tab)) return;
+    capture();
+    if (tab.dirty && !confirm(`“${tab.file.name}”尚未保存。关闭并放弃修改吗？`)) return;
+    const index = tabs.indexOf(tab);
+    const wasActive = tab.file === state.active;
+    tabs.splice(index, 1);
+    closed.push({ workspaceId: tab.file.workspaceId, path: tab.file.path });
+    if (closed.length > 20) closed.shift();
+    if (wasActive) {
+      if (tabs.length) activate(tabs[Math.min(index, tabs.length - 1)]);
+      else clearEditor();
+    }
+    sync();
+  }
+  async function openReference(item) {
+    const workspace = state.workspaces.find(w => w.id === item.workspaceId);
+    if (!workspace) return setStatus('工作区已移除，请重新添加目录。', true);
+    if (!(await permission(workspace.handle))) {
+      $('workspaceDialog').showModal();
+      return setStatus('请在工作区面板恢复此目录的访问权限。', true);
+    }
+    let entries = state.fileCache.get(workspace.id) || await scanWorkspace(workspace);
+    let entry = entries.find(file => file.path === item.path);
+    if (!entry) {
+      entries = await scanWorkspace(workspace);
+      entry = entries.find(file => file.path === item.path);
+    }
+    if (!entry) return setStatus('文件已移动或删除，请刷新后重新选择。', true);
+    if (await openFile(workspace.id, entry)) {
+      if (state.activeWorkspaceId !== workspace.id) {
+        state.activeWorkspaceId = workspace.id;
+        await put('activeWorkspaceId', workspace.id);
+        await api.render();
+      }
+    }
+  }
+  function renderCollection() {
+    const collection = $('collectionList');
+    collection.hidden = view === 'files';
+    $('fileList').parentElement.hidden = view !== 'files';
+    filePanel.querySelector('.panelHead').hidden = view !== 'files';
+    if (view === 'files') return;
+    const query = $('fileSearch').value.toLocaleLowerCase();
+    const items = (view === 'recent' ? recent : favorites)
+      .filter(file => `${file.name} ${file.path}`.toLocaleLowerCase().includes(query));
+    collection.replaceChildren();
+    for (const item of items) {
+      const row = button('', () => openReference(item));
+      row.className = 'collectionItem';
+      row.append(node('strong', item.name), node('small', `${state.workspaces.find(w => w.id === item.workspaceId)?.name || '已移除工作区'} / ${item.path}`));
+      row.title = item.path; collection.append(row);
+    }
+    if (!items.length) collection.append(node('div', view === 'recent' ? '打开过的文件会显示在这里。' : '在编辑区点击“☆ 收藏”，固定常用脚本。', 'placeholder'));
+  }
+  function selectView(next) {
+    view = next;
+    document.querySelectorAll('[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === view));
+    renderCollection();
+  }
+  function cursorStatus() {
+    if (!state.active) { $('cursorStatus').textContent = ''; return; }
+    const position = cursorPosition(editorLines(editor.value), editor.selectionStart);
+    $('cursorStatus').textContent = `行 ${position.line}，列 ${position.column}`;
+  }
+  function jump(start, end = start) {
+    clearSecondaryCursors();
+    editor.focus(); editor.setSelectionRange(start, end);
+    const line = editor.value.slice(0, start).split('\n').length - 1;
+    editor.scrollTop = Math.max(0, line * parseFloat(getComputedStyle(editor).lineHeight) - editor.clientHeight / 3);
+    renderEditorDecorations(); cursorStatus();
+  }
+  function editText(text, start, end) {
+    clearSecondaryCursors();
+    editor.value = text; editor.setSelectionRange(start, end);
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    editor.focus();
+  }
+  const findView = UI.createFindReplace({
+    editor, bar: $('findBar'), input: $('findInput'), replacement: $('replaceInput'),
+    caseToggle: $('matchCase'), count: $('findCount'), replaceRow: $('replaceRow'),
+    buttons: { previous: $('previousMatch'), next: $('nextMatch'), one: $('replaceOne'), all: $('replaceAll'), close: $('closeFind') },
+    onEdit: editText, onJump: jump, onFeedback: setStatus,
+  });
+  function showFind(replace = false) {
+    if (!state.active) return setStatus('请先打开文件。');
+    findView.show(replace);
+  }
+  const quickSearch = UI.createQuickOpen({
+    dialog: $('searchDialog'), input: $('globalSearch'), results: $('globalResults'), count: $('searchCount'),
+    async onSelect(result) {
+      const { workspace, entry } = result.record;
+      if (await openFile(workspace.id, entry)) {
+        const changed = state.activeWorkspaceId !== workspace.id; state.activeWorkspaceId = workspace.id;
+        if (changed) { await put('activeWorkspaceId', workspace.id); await api.render(); }
+      }
+    },
+  });
+  function showSearch() {
+    quickSearch.show();
+    runSearch();
+    if (searchLoading) return;
+    const missing = state.workspaces.filter(workspace => !state.fileCache.has(workspace.id));
+    if (!missing.length) return;
+    searchLoading = true;
+    runSearch();
+    // Permission and directory reads happen once when opening, never on each search keystroke.
+    Promise.allSettled(missing.map(async workspace => {
+      if (await permission(workspace.handle)) await scanWorkspace(workspace);
+    })).then(() => {
+      searchLoading = false;
+      if ($('searchDialog').open) runSearch();
+    });
+  }
+  function runSearch() {
+    const signature = `${state.fileIndexVersion}:${state.workspaces.map(w=>w.id).join(',')}`;
+    if (signature !== indexSignature) {
+      indexSignature = signature;
+      quickSearch.setItems(state.workspaces.flatMap(workspace => (state.fileCache.get(workspace.id) || [])
+        .map(entry => ({ key: keyOf({ workspaceId: workspace.id, path: entry.path }), label: entry.name,
+          description: `${workspace.name} / ${entry.path}`, term: `${entry.name} ${entry.path}`, record: { workspace, entry } }))));
+    }
+    const unread = state.workspaces.filter(w=>!state.fileCache.has(w.id)).length;
+    quickSearch.search({ idleMessage: searchLoading ? '正在读取其他已授权工作区…' : '按文件名或路径查找 · Enter 打开 · Esc 关闭',
+      suffix: searchLoading ? ' · 正在读取其他目录…' : unread ? ` · ${unread} 个工作区未授权，请恢复访问` : '' });
+  }
+
+  const layout = document.querySelector('.layout');
+  const filePanel = $('directoryNavigation');
+  const manager = $('workspaceDialog');
+  const shell = UI.createShell({
+    root: document.querySelector('.app'), layout, navigation: filePanel,
+    content: document.querySelector('.editorPanel'), toggle: $('toggleNavigation'), splitter: $('navigationSplitter'),
+    onChange(value) {
+      Promise.all([put('layout', { files: `${value.width}px` }), put('navigationHidden', value.hidden)])
+        .catch(error => setStatus(`布局设置未保存：${error.message}`, true));
+    },
+  });
+  const workspaceMenu = $('workspaceMenu');
+  function renderWorkspaceMenu() {
+    const list = $('workspaceMenuList');
+    list.replaceChildren();
+    for (const workspace of state.workspaces) {
+      const selected = workspace.id === state.activeWorkspaceId;
+      const pick = button('', () => {
+        workspaceMenu.hidePopover();
+        api.requestAccess(workspace.id);
+      }, workspace.name);
+      pick.className = 'workspaceOption';
+      pick.setAttribute('role', 'menuitemradio');
+      pick.setAttribute('aria-checked', String(selected));
+      pick.append(node('span', workspace.name, 'workspaceOptionName'), node('span', selected ? '✓' : '', 'workspaceCheck'));
+      list.append(pick);
+    }
+    if (!state.workspaces.length) list.append(node('div', '还没有工作区，添加一个本地目录。', 'workspaceMenuEmpty'));
+  }
+  const workspacePopover = UI.createPopover({ trigger: $('manageWorkspaces'), menu: workspaceMenu, onOpen: renderWorkspaceMenu });
+  $('menuAddWorkspace').onclick = () => { workspaceMenu.hidePopover(); $('addWorkspace').click(); };
+  $('menuManageWorkspaces').onclick = () => { workspaceMenu.hidePopover(); manager.showModal(); };
+  $('closeWorkspaces').onclick = () => manager.close();
+  $('closeSearch').onclick = () => $('searchDialog').close();
+  $('quickOpen').onclick = showSearch;
+  $('emptyQuickOpen').onclick = showSearch;
+  $('favoriteFile').onclick = () => {
+    if (!state.active) return;
+    const key = keyOf(state.active);
+    if (favorites.some(item => keyOf(item) === key)) favorites = favorites.filter(item => keyOf(item) !== key);
+    else favorites.push({ workspaceId: state.active.workspaceId, path: state.active.path, name: state.active.name });
+    put('favoriteFiles', favorites); sync(); renderCollection();
+  };
+  document.querySelectorAll('[data-view]').forEach(item => item.onclick = () => selectView(item.dataset.view));
+  $('fileSearch').addEventListener('input', renderCollection);
+  $('findFile').onclick = () => showFind();
+  $('replaceFile').onclick = () => showFind(true);
+  editor.addEventListener('input', cursorStatus);
+  editor.addEventListener('keyup', cursorStatus); editor.addEventListener('click', cursorStatus);
+  window.addEventListener('keydown', event => {
+    if (state.busy) return;
+    if (event.key === 'Escape' && !$('findBar').hidden) { findView.close(); }
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const key = event.key.toLowerCase();
+    if (key === 'p') { event.preventDefault(); if (!$('searchDialog').open) showSearch(); }
+    if (key === 'b' && !document.querySelector('dialog[open]')) { event.preventDefault(); $('toggleNavigation').click(); }
+    if (!event.shiftKey && (key === 'f' || key === 'h')) { event.preventDefault(); showFind(key === 'h'); }
+    if (key === 't' && event.shiftKey) { event.preventDefault(); const item = closed.pop(); if (item) openReference(item); }
+    if (key === 'tab' && tabs.length > 1) {
+      event.preventDefault();
+      activate(tabs[(tabs.indexOf(activeTab()) + (event.shiftKey ? tabs.length - 1 : 1)) % tabs.length]);
+    }
+  });
+  const ready = Promise.all([get('recentFiles'), get('favoriteFiles'), get('navigationHidden'), get('layout')]).then(([r, f, hidden, saved]) => {
+    recent = Array.isArray(r) ? r : []; favorites = Array.isArray(f) ? f : [];
+    shell.restore({ width: saved?.files, hidden }); renderCollection(); sync();
+  });
+  return {
+    ready, capture, sync, opened, runSearch,
+    destroy() { tabView.destroy(); workspacePopover.destroy(); shell.destroy(); findView.destroy(); quickSearch.destroy(); },
+    cancelSearch() { quickSearch.clear(); },
+    has(workspaceId, path) { return tabs.some(t => t.file.workspaceId === workspaceId && t.file.path === path); },
+    restore(workspaceId, path) {
+      const tab = tabs.find(t => t.file.workspaceId === workspaceId && t.file.path === path);
+      if (!tab) return false;
+      activate(tab); return true;
+    },
+    discard(workspaceId, path) {
+      const index = tabs.findIndex(t => t.file.workspaceId === workspaceId && t.file.path === path);
+      if (index >= 0) tabs.splice(index, 1);
+      sync();
+    },
+    dirty(workspaceId, path) {
+      capture(); return tabs.some(t => t.dirty && (!workspaceId || t.file.workspaceId === workspaceId) && (!path || t.file.path === path));
+    },
+    async renameFolder(workspaceId, from, to) {
+      capture();
+      const entries = state.fileCache.get(workspaceId) || [];
+      for (const tab of tabs) {
+        if (tab.file.workspaceId !== workspaceId || (from && !isWithin(tab.file.path, from))) continue;
+        const path = renamedPath(tab.file.path, from, to);
+        const entry = entries.find(item => item.path === path);
+        if (!entry) throw new Error(`无法重新定位标签：${path}`);
+        Object.assign(tab.file, entry);
+      }
+      const remap = item => item.workspaceId === workspaceId
+        ? { ...item, path:renamedPath(item.path, from, to) } : item;
+      recent = recent.map(remap); favorites = favorites.map(remap);
+      for (let i=0; i<closed.length; i++) closed[i] = remap(closed[i]);
+      await Promise.all([put('recentFiles', recent), put('favoriteFiles', favorites)]);
+      if (state.active?.workspaceId === workspaceId) {
+        const workspace = state.workspaces.find(item=>item.id === workspaceId);
+        setFileIdentity(state.active.name, `${workspace.name} / ${state.active.path}`);
+      }
+      renderCollection(); sync();
+    },
+    removeWorkspace(id) {
+      for (let index = tabs.length - 1; index >= 0; index--) if (tabs[index].file.workspaceId === id) tabs.splice(index, 1);
+      sync();
+    },
+    refresh() {
+      $('workspaceName').textContent = state.workspaces.find(w => w.id === state.activeWorkspaceId)?.name || '选择工作区';
+      $('manageWorkspaces').title = $('workspaceName').textContent;
+      if (workspaceMenu.matches(':popover-open')) renderWorkspaceMenu();
+      updateLocation();
+      renderCollection(); sync();
+    },
+  };
+};
+
+},{"../vendor/workbench/workbench":55,"./editor-window":45,"./folder-operations":48}],52:[function(require,module,exports){
+function normalizeWorkspaces(value) {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set();
+  return value.filter((workspace) => {
+    if (!workspace || typeof workspace.id !== 'string' || !workspace.id || ids.has(workspace.id)
+      || typeof workspace.name !== 'string' || !workspace.name || !workspace.handle) return false;
+    ids.add(workspace.id);
+    return true;
+  });
+}
+
+function selectWorkspace(workspaces, candidateId, fallbackId = null) {
+  return workspaces.some((workspace) => workspace.id === candidateId)
+    ? candidateId
+    : workspaces.some((workspace) => workspace.id === fallbackId)
+      ? fallbackId
+      : workspaces[0]?.id || null;
+}
+
+function removeWorkspace(workspaces, id, activeId) {
+  const remaining = workspaces.filter((workspace) => workspace.id !== id);
+  return { workspaces: remaining, activeId: selectWorkspace(remaining, activeId) };
+}
+
+function moveWorkspace(workspaces, movingId, beforeId) {
+  const moving = workspaces.find((workspace) => workspace.id === movingId);
+  if (!moving || movingId === beforeId) return workspaces;
+  const remaining = workspaces.filter((workspace) => workspace.id !== movingId);
+  const index = remaining.findIndex((workspace) => workspace.id === beforeId);
+  remaining.splice(index < 0 ? remaining.length : index, 0, moving);
+  return remaining;
+}
+
+module.exports = { moveWorkspace, normalizeWorkspaces, removeWorkspace, selectWorkspace };
+
+},{}],53:[function(require,module,exports){
+const INDENT = "\t";
+
+function editIndent(value, start, end, outdent = false) {
+  if (!outdent && start === end) {
+    return {
+      replaceStart: start,
+      replaceEnd: end,
+      replacement: INDENT,
+      selectionStart: start + INDENT.length,
+      selectionEnd: start + INDENT.length,
+    };
+  }
+
+  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+  const lastSelected = end > start && value[end - 1] === "\n" ? end - 1 : end;
+  const nextLine = value.indexOf("\n", lastSelected);
+  const lineEnd = nextLine < 0 ? value.length : nextLine;
+  const lines = value.slice(lineStart, lineEnd).split("\n");
+  const changes = [];
+  const replacement = lines.map((line) => {
+    if (!outdent) {
+      changes.push(INDENT.length);
+      return INDENT + line;
+    }
+    const leading = line.match(/^(?:\t| {1,2})/);
+    const removed = leading ? leading[0].length : 0;
+    changes.push(-removed);
+    return line.slice(removed);
+  }).join("\n");
+  if (changes.every((change) => change === 0)) return null;
+
+  const firstStart = Math.max(lineStart, start + changes[0]);
+  const totalChange = changes.reduce((sum, change) => sum + change, 0);
+  return {
+    replaceStart: lineStart,
+    replaceEnd: lineEnd,
+    replacement,
+    selectionStart: firstStart,
+    selectionEnd: end === start ? firstStart : end + totalChange,
+  };
+}
+
+module.exports = { editIndent };
+
+},{}],54:[function(require,module,exports){
 function previousCharacterStart(value, position) {
   if (position === 0) return 0;
   const previous = value.charCodeAt(position - 1);
@@ -10593,40 +10930,415 @@ function applyMultiEdit(value, positions, action, text = "") {
 
 module.exports = { applyMultiEdit };
 
-},{}],50:[function(require,module,exports){
-function normalizeWorkspaces(value) {
-  if (!Array.isArray(value)) return [];
-  const ids = new Set();
-  return value.filter((workspace) => {
-    if (!workspace || typeof workspace.id !== 'string' || !workspace.id || ids.has(workspace.id)
-      || typeof workspace.name !== 'string' || !workspace.name || !workspace.handle) return false;
-    ids.add(workspace.id);
-    return true;
-  });
+},{}],55:[function(require,module,exports){
+/* Tool Workbench 1.0.0 — dependency-free DOM components. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.ToolWorkbench = factory();
+})(typeof globalThis === 'object' ? globalThis : this, function () {
+  'use strict';
+  const VERSION = '1.0.0';
+  function node(tag, text, cls) {
+    const element = document.createElement(tag);
+    if (text !== undefined) element.textContent = text;
+    if (cls) element.className = cls;
+    return element;
+  }
+  function button(text, action, title = text) {
+    const element = node('button', text);
+    element.type = 'button'; element.title = title; element.setAttribute('aria-label', title);
+    if (action) element.addEventListener('click', action);
+    return element;
+  }
+  function icon(name, cls = '') {
+    const paths = {
+      folder: ['0 0 20 20', 'M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z'],
+      file: ['0 0 16 16', 'M9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9.5 2ZM9 2v4h4'],
+      chevron: ['0 0 18 18', 'M6.5 4.5 11.5 9l-5 4.5'],
+    };
+    if (!paths[name]) throw new Error('Unknown workbench icon');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', paths[name][0]); svg.setAttribute('aria-hidden', 'true');
+    if (cls) svg.setAttribute('class', cls);
+    const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path'); shape.setAttribute('d', paths[name][1]); svg.append(shape); return svg;
+  }
+  function scope() {
+    const cleanups = [];
+    return {
+      on(target, type, handler, options) {
+        target.addEventListener(type, handler, options);
+        cleanups.push(() => target.removeEventListener(type, handler, options));
+      },
+      destroy() { cleanups.splice(0).reverse().forEach(fn => fn()); },
+    };
+  }
+  function clampWidth(value, maximum = 700, minimum = 220) {
+    const parsed = Number.parseFloat(value);
+    return Math.max(Math.min(minimum, maximum), Math.min(Number.isFinite(parsed) ? parsed : 280, maximum));
+  }
+  function reorder(items, key, index) {
+    const from = items.findIndex(item => item.key === key);
+    if (from < 0) return items;
+    const next = items.slice(), [moving] = next.splice(from, 1);
+    next.splice(Math.max(0, Math.min(next.length, index)), 0, moving);
+    return next;
+  }
+  function createShell({ root, layout, navigation, content, toggle, splitter, onChange = () => {} }) {
+    const events = scope();
+    root.classList.add('wb', 'wb-shell'); layout.classList.add('wb-layout');
+    navigation.classList.add('navigation'); content.classList.add('wb-content');
+    let drag = null, destroyed = false;
+    const maximum = () => Math.max(180, Math.min(700, layout.clientWidth - 300));
+    function width(value, notify = false) {
+      const next = clampWidth(value, maximum());
+      root.style.setProperty('--files-width', `${next}px`);
+      splitter.setAttribute('aria-valuenow', String(Math.round(next)));
+      splitter.setAttribute('aria-valuemax', String(maximum()));
+      if (notify) onChange({ width: next, hidden: layout.classList.contains('navigationHidden') });
+    }
+    function hidden(value, notify = false) {
+      layout.classList.toggle('navigationHidden', Boolean(value));
+      toggle.setAttribute('aria-expanded', String(!value));
+      toggle.classList.toggle('collapsed', Boolean(value));
+      toggle.title = value ? '显示左侧目录栏（Ctrl+B）' : '隐藏左侧目录栏（Ctrl+B）';
+      toggle.setAttribute('aria-label', toggle.title);
+      if (notify) onChange({ width: Number.parseFloat(root.style.getPropertyValue('--files-width')), hidden: Boolean(value) });
+    }
+    splitter.classList.add('resizer'); splitter.tabIndex = 0;
+    splitter.setAttribute('role', 'separator'); splitter.setAttribute('aria-orientation', 'vertical');
+    splitter.setAttribute('aria-valuemin', '220'); splitter.setAttribute('aria-label', '调整目录宽度');
+    events.on(toggle, 'click', () => hidden(!layout.classList.contains('navigationHidden'), true));
+    events.on(splitter, 'pointerdown', event => {
+      if (event.button !== 0) return;
+      drag = { id: event.pointerId, x: event.clientX, width: navigation.getBoundingClientRect().width };
+      splitter.setPointerCapture(event.pointerId); splitter.classList.add('dragging'); event.preventDefault();
+    });
+    events.on(splitter, 'pointermove', event => { if (drag) width(drag.width + event.clientX - drag.x); });
+    function end(event) {
+      if (!drag || (event.pointerId !== undefined && event.pointerId !== drag.id)) return;
+      drag = null; splitter.classList.remove('dragging');
+      width(root.style.getPropertyValue('--files-width'), true);
+    }
+    events.on(splitter, 'pointerup', end); events.on(splitter, 'pointercancel', end); events.on(splitter, 'lostpointercapture', end);
+    events.on(splitter, 'keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const now = Number.parseFloat(root.style.getPropertyValue('--files-width'));
+      width(event.key === 'Home' ? 220 : event.key === 'End' ? maximum() : now + (event.key === 'ArrowLeft' ? -10 : 10), true);
+    });
+    events.on(window, 'resize', () => width(root.style.getPropertyValue('--files-width')));
+    width(280);
+    return { width, hidden, restore(value = {}) { if (!destroyed) { width(value.width); hidden(value.hidden ?? matchMedia('(max-width:650px)').matches); } },
+      destroy() { destroyed = true; drag = null; splitter.classList.remove('dragging'); events.destroy(); } };
+  }
+  function createTabs({ host, onSelect = () => {}, onClose = () => {}, onReorder = () => {}, placeholder = '工作台', closeOnDoubleClick = true }) {
+    const events = scope(), rows = new Map();
+    host.classList.add('wb-tabs'); host.setAttribute('role', 'tablist'); host.setAttribute('aria-label', '打开的内容');
+    let items = [], signature = '', dragging = null, dropIndex = null, dragX = 0, frame = 0;
+    const indicator = node('div', undefined, 'tabDropIndicator');
+    indicator.hidden = true; indicator.setAttribute('aria-hidden', 'true'); document.body.append(indicator);
+    const empty = node('span', placeholder, 'tabsPlaceholder');
+    function clearDrop() { dropIndex = null; indicator.hidden = true; cancelAnimationFrame(frame); frame = 0; }
+    function finish() { clearDrop(); rows.get(dragging)?.classList.remove('dragging'); dragging = null; }
+    function showDrop(x) {
+      const remaining = items.filter(item => item.key !== dragging);
+      const before = remaining.findIndex(item => { const box = rows.get(item.key).getBoundingClientRect(); return x < box.left + box.width / 2; });
+      dropIndex = before < 0 ? remaining.length : before;
+      const bounds = host.getBoundingClientRect(), target = rows.get((remaining[dropIndex] || remaining[remaining.length - 1])?.key);
+      const rect = target?.getBoundingClientRect();
+      const left = rect ? (dropIndex < remaining.length ? rect.left : rect.right) : bounds.left;
+      Object.assign(indicator.style, { left: `${Math.max(bounds.left + 2, Math.min(bounds.right - 3, left)) - 1}px`, top: `${bounds.top + 4}px`, height: `${bounds.height - 8}px` });
+      indicator.hidden = false;
+    }
+    function scroll() {
+      frame = 0; if (dragging === null || dropIndex === null) return;
+      const box = host.getBoundingClientRect(), step = dragX < box.left + 36 ? -10 : dragX > box.right - 36 ? 10 : 0;
+      if (step) { host.scrollLeft += step; showDrop(dragX); frame = requestAnimationFrame(scroll); }
+    }
+    const record = target => target.closest('.editorTab');
+    events.on(host, 'click', event => {
+      const row = record(event.target); if (!row || !host.contains(row)) return;
+      (event.target.closest('.closeTab') ? onClose : onSelect)(row._key);
+    });
+    events.on(host, 'dblclick', event => { const row = record(event.target); if (closeOnDoubleClick && row && !event.target.closest('.closeTab')) onClose(row._key); });
+    events.on(host, 'keydown', event => {
+      const row = record(event.target); if (!row) return;
+      const index = items.findIndex(item => item.key === row._key);
+      if (event.key === 'Delete') { event.preventDefault(); onClose(row._key); }
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowLeft' ? -1 : 1) + items.length) % items.length;
+      onSelect(items[next].key); rows.get(items[next].key)?.firstChild.focus();
+    });
+    events.on(host, 'dragstart', event => {
+      const row = record(event.target); if (!row) return;
+      dragging = row._key; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(dragging));
+      row.classList.add('dragging');
+    });
+    events.on(host, 'dragover', event => { if (dragging === null) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; dragX = event.clientX; showDrop(dragX); if (!frame) frame = requestAnimationFrame(scroll); });
+    events.on(host, 'dragleave', event => { if (!host.contains(event.relatedTarget)) clearDrop(); });
+    events.on(host, 'drop', event => {
+      if (dragging === null) return; event.preventDefault(); showDrop(event.clientX);
+      const key = dragging, index = dropIndex; finish(); onReorder(key, index);
+    });
+    events.on(host, 'dragend', finish); events.on(window, 'resize', clearDrop);
+    function update(next) {
+      if (new Set(next.map(item => item.key)).size !== next.length) throw new Error('Tabs keys must be unique');
+      const nextSignature = JSON.stringify(next.map(item => [item.key, item.label, item.title, item.dirty, item.selected]));
+      items = next;
+      if (nextSignature === signature) return;
+      signature = nextSignature;
+      const keys = new Set(items.map(item => item.key));
+      for (const [key, row] of rows) if (!keys.has(key)) { row.remove(); rows.delete(key); }
+      empty.remove();
+      items.forEach((item, index) => {
+        let row = rows.get(item.key);
+        if (!row) { row = node('div', undefined, 'editorTab'); row._key = item.key; row.draggable = true; row.append(button(''), button('×', null, '关闭')); row.lastChild.className = 'closeTab'; rows.set(item.key, row); }
+        row.classList.toggle('selected', Boolean(item.selected)); row.setAttribute('role', 'presentation');
+        const [pick, close] = row.children;
+        pick.setAttribute('role', 'tab'); pick.setAttribute('aria-selected', String(Boolean(item.selected))); pick.tabIndex = item.selected ? 0 : -1;
+        pick.textContent = `${item.dirty ? '● ' : ''}${item.label}`; pick.title = item.title || item.label; pick.setAttribute('aria-label', pick.textContent);
+        close.title = `关闭 ${item.label}`; close.setAttribute('aria-label', close.title);
+        if (host.children[index] !== row) host.insertBefore(row, host.children[index] || null);
+      });
+      if (!items.length) host.append(empty);
+    }
+    return { update, destroy() { finish(); events.destroy(); indicator.remove(); host.replaceChildren(); rows.clear(); } };
+  }
+  function createTree({ host, onSelect = () => {}, onToggle = () => {}, onAction = () => {} }) {
+    const events = scope(), rows = new Map(); let items = [];
+    host.classList.add('fileTree'); host.setAttribute('role', 'tree'); host.setAttribute('aria-label', '目录与文件');
+    function select(event) {
+      const row = event.target.closest('[data-wb-key]'); if (!row || !host.contains(row)) return;
+      const item = row._item, action = event.target.closest('[data-action]');
+      if (action) { if (!action.disabled) onAction(item, action.dataset.action); return; }
+      if (event.target.closest('.treeToggle')) onToggle(item, false);
+      else onSelect(item);
+    }
+    events.on(host, 'click', select);
+    events.on(host, 'keydown', event => {
+      const row = event.target.closest('[data-wb-key]'); if (!row) return;
+      if (event.target.closest('button')) return;
+      const index = items.indexOf(row._item);
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+        for (const element of rows.values()) element.tabIndex = -1;
+        const target = rows.get(items[next].key); target.tabIndex = 0; target.focus();
+      } else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(row._item); }
+      else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+        event.preventDefault(); const item = row._item;
+        if (item.kind === 'folder' && item.expanded !== (event.key === 'ArrowRight')) onToggle(item, false);
+        else if (event.key === 'ArrowLeft') {
+          const parent = items.slice(0, index).reverse().find(candidate => candidate.depth < item.depth);
+          if (parent) rows.get(parent.key).focus();
+        } else if (items[index + 1]?.depth > item.depth) rows.get(items[index + 1].key).focus();
+      }
+    });
+    function update(next) {
+      if (new Set(next.map(item => item.key)).size !== next.length) throw new Error('Tree keys must be unique');
+      const active = document.activeElement?.closest('[data-wb-key]')?._item?.key;
+      items = next; const keys = new Set(items.map(item => item.key));
+      for (const [key, row] of rows) if (!keys.has(key)) { row.remove(); rows.delete(key); }
+      items.forEach((item, index) => {
+        let row = rows.get(item.key);
+        if (!row) { row = node('div'); row.dataset.wbKey = String(item.key); rows.set(item.key, row); }
+        row._item = item; row.dataset.path = item.path ?? String(item.key);
+        row.className = item.kind === 'folder' ? `folderRow${item.expanded ? ' open' : ''}${item.selected ? ' selected' : ''}` : `fileRow${item.depth ? ' nested' : ''}${item.selected ? ' active' : ''}`;
+        row.setAttribute('role', 'treeitem'); row.setAttribute('aria-level', String((item.depth || 0) + 1)); row.setAttribute('aria-selected', String(Boolean(item.selected)));
+        if (item.kind === 'folder') row.setAttribute('aria-expanded', String(Boolean(item.expanded))); else row.removeAttribute('aria-expanded');
+        row.tabIndex = active !== undefined ? (item.key === active ? 0 : -1) : index === 0 ? 0 : -1;
+        row.title = item.title || item.label;
+        const signature = JSON.stringify([item.kind, item.label, item.meta, item.depth, item.expanded, item.badges, item.actions]);
+        if (row._signature !== signature) {
+          row._signature = signature;
+          const cell = node('div', undefined, item.kind === 'folder' ? 'treeNameCell' : 'fileNameCell');
+          cell.style.paddingLeft = `${(item.depth || 0) * 20 + (item.kind === 'folder' ? 0 : 22)}px`;
+          if (item.kind === 'folder') {
+            const arrow = button('', null, item.expanded ? '收起目录' : '展开目录'); arrow.append(icon('chevron')); arrow.className = 'treeToggle'; arrow.setAttribute('aria-expanded', String(Boolean(item.expanded)));
+            const pick = button(item.label, null, item.title || item.label); pick.className = 'folderPick folderName'; cell.append(arrow, icon('folder', 'folderIcon'), pick);
+          } else cell.append(icon('file', 'fileIcon'), node('span', item.label, 'fileNameText'));
+          if (item.badges?.length) {
+            const badges = node('span', undefined, 'folderCounts');
+            for (const badge of item.badges) { const value = node('span', undefined, 'folderCount'); if (badge.icon) value.append(icon(badge.icon)); value.append(document.createTextNode(badge.text)); value.title = badge.title || badge.text; badges.append(value); }
+            cell.append(badges);
+          }
+          const actions = node('div', undefined, item.kind === 'folder' ? 'folderActions' : 'fileRowActions');
+          for (const action of item.actions || []) { const control = button(action.label, null, action.title); control.className = action.danger ? 'fileDelete' : 'fileAction'; if (item.kind === 'folder') control.classList.add(action.id === 'rename' ? 'folderRename' : 'folderDelete'); control.dataset.action = action.id; control.disabled = Boolean(action.disabled); actions.append(control); }
+          if (item.kind === 'folder') cell.append(actions);
+          row.replaceChildren(cell);
+          if (item.meta) { const meta = node('div', item.meta, 'fileMeta'); meta.style.paddingLeft = `${(item.depth || 0) * 20 + 40}px`; row.append(meta); }
+          if (item.kind !== 'folder') row.append(actions);
+        }
+        if (host.children[index] !== row) host.insertBefore(row, host.children[index] || null);
+      });
+    }
+    return { update,
+      setSelected(predicate) {
+        for (const item of items) {
+          const selected = Boolean(predicate(item));
+          item.selected = selected;
+          const row = rows.get(item.key);
+          row.classList.toggle(item.kind === 'folder' ? 'selected' : 'active', selected);
+          row.setAttribute('aria-selected', String(selected));
+        }
+      },
+      destroy() { events.destroy(); host.replaceChildren(); rows.clear(); } };
+  }
+  function createPopover({ trigger, menu, onOpen = () => {} }) {
+    const events = scope(); menu.classList.add('wb', 'wb-popover');
+    menu.setAttribute('popover', 'auto'); trigger.setAttribute('popovertarget', menu.id); trigger.setAttribute('aria-haspopup', 'menu');
+    function position() {
+      if (!menu.matches(':popover-open')) return;
+      const box = trigger.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(innerWidth - menu.offsetWidth - 8, box.left))}px`;
+      menu.style.top = `${Math.max(8, Math.min(innerHeight - menu.offsetHeight - 8, box.bottom + 8))}px`;
+    }
+    events.on(menu, 'beforetoggle', event => { trigger.setAttribute('aria-expanded', String(event.newState === 'open')); if (event.newState === 'open') onOpen(); });
+    events.on(menu, 'toggle', event => { if (event.newState === 'open') { position(); (menu.querySelector('[aria-checked="true"]') || menu.querySelector('button:not(:disabled)'))?.focus(); } });
+    events.on(trigger, 'keydown', event => { if (event.key === 'ArrowDown') { event.preventDefault(); menu.showPopover(); } });
+    events.on(menu, 'keydown', event => {
+      const items = [...menu.querySelectorAll('button:not(:disabled)')]; const index = items.indexOf(document.activeElement);
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length; items[next]?.focus();
+      }
+      if (event.key === 'Escape') { menu.hidePopover(); trigger.focus(); }
+    });
+    events.on(window, 'resize', position); events.on(window, 'scroll', position, true);
+    return { position, close() { menu.hidePopover(); }, destroy() { if (menu.matches(':popover-open')) menu.hidePopover(); events.destroy(); trigger.setAttribute('aria-expanded', 'false'); } };
+  }
+function matches(text, query, sensitive = false, limit = Infinity) {
+  if (!query) return [];
+  // Use escaped Unicode regexp so offsets always refer to the original text.
+  const pattern = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const result = [];
+  for (const match of text.matchAll(new RegExp(pattern, sensitive ? "gu" : "giu"))) {
+    result.push({ start: match.index, end: match.index + match[0].length });
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+function replaceAll(text, query, replacement, sensitive = false) {
+  const found = matches(text, query, sensitive);
+  for (let index = found.length - 1; index >= 0; index--) {
+    const match = found[index];
+    text = text.slice(0, match.start) + replacement + text.slice(match.end);
+  }
+  return { text, count: found.length };
+}
+function excerpt(text, position) {
+  const start = text.lastIndexOf("\n", position - 1) + 1;
+  const end = text.indexOf("\n", position);
+  return { line: text.slice(0, position).split("\n").length,
+    text: text.slice(start, end < 0 ? text.length : end).trim().slice(0, 220) };
 }
 
-function selectWorkspace(workspaces, candidateId, fallbackId = null) {
-  return workspaces.some((workspace) => workspace.id === candidateId)
-    ? candidateId
-    : workspaces.some((workspace) => workspace.id === fallbackId)
-      ? fallbackId
-      : workspaces[0]?.id || null;
-}
-
-function removeWorkspace(workspaces, id, activeId) {
-  const remaining = workspaces.filter((workspace) => workspace.id !== id);
-  return { workspaces: remaining, activeId: selectWorkspace(remaining, activeId) };
-}
-
-function moveWorkspace(workspaces, movingId, beforeId) {
-  const moving = workspaces.find((workspace) => workspace.id === movingId);
-  if (!moving || movingId === beforeId) return workspaces;
-  const remaining = workspaces.filter((workspace) => workspace.id !== movingId);
-  const index = remaining.findIndex((workspace) => workspace.id === beforeId);
-  remaining.splice(index < 0 ? remaining.length : index, 0, moving);
-  return remaining;
-}
-
-module.exports = { moveWorkspace, normalizeWorkspaces, removeWorkspace, selectWorkspace };
+  function createQuickOpen({ dialog, input, results, count, onSelect, limit = 100, delay = 120 }) {
+    const events = scope(); let items = [], timer = 0, hint = {};
+    function setItems(next) { items = next.map(item => ({ ...item, term: (item.term ?? `${item.label} ${item.description || ''}`).toLocaleLowerCase() })); }
+    function search(options = hint) {
+      hint = options; clearTimeout(timer);
+      const query = input.value.trim().toLocaleLowerCase(), fragment = document.createDocumentFragment(); let total = 0;
+      if (!query) { results.replaceChildren(); count.textContent = options.idleMessage || '输入名称或路径 · Enter 打开 · Esc 关闭'; return; }
+      for (const item of items) {
+        if (!item.term.includes(query)) continue;
+        if (++total > limit) continue;
+        const row = button('', null, item.description || item.label); row.className = 'result'; row._item = item;
+        row.append(node('strong', item.label), node('small', item.description || '')); fragment.append(row);
+      }
+      if (!total) fragment.append(node('div', '没有匹配项。', 'placeholder'));
+      results.replaceChildren(fragment);
+      count.textContent = `${total > limit ? `共 ${total} 项，显示前 ${limit} 项` : `${total} 项结果`}${options.suffix || ''}`;
+    }
+    function choose(item) { if (!item) return; dialog.close(); onSelect(item); }
+    events.on(input, 'input', () => { clearTimeout(timer); results.replaceChildren(); timer = setTimeout(() => search(), delay); });
+    events.on(input, 'keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); choose(results.querySelector('button')?._item); }
+      if (event.key === 'ArrowDown') { event.preventDefault(); results.querySelector('button')?.focus(); }
+    });
+    events.on(results, 'click', event => { const row = event.target.closest('button'); if (row && results.contains(row)) choose(row._item); });
+    events.on(results, 'keydown', event => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); (event.key === 'ArrowDown' ? event.target.nextElementSibling : event.target.previousElementSibling)?.focus(); }
+    });
+    events.on(dialog, 'close', () => clearTimeout(timer));
+    return { setItems, search, show() { if (!dialog.open) dialog.showModal(); input.focus(); search(); }, clear() { clearTimeout(timer); results.replaceChildren(); }, destroy() { clearTimeout(timer); events.destroy(); results.replaceChildren(); } };
+  }
+  function createFindReplace({ editor, bar, input, replacement, caseToggle, count, replaceRow, buttons, onEdit, onJump, onFeedback = () => {} }) {
+    const events = scope(); let cached = null;
+    function found() {
+      const signature = [editor.value, input.value, caseToggle.checked];
+      if (!cached || signature.some((value, index) => value !== cached.signature[index])) cached = { signature, hits: matches(...signature) };
+      return cached.hits;
+    }
+    function updateCount() { count.textContent = input.value ? `${found().length} 处匹配` : '输入查找内容'; }
+    function next(back = false) {
+      const hits = found(); updateCount(); if (!hits.length) return;
+      const hit = back ? [...hits].reverse().find(item => item.start < editor.selectionStart) || hits.at(-1)
+        : hits.find(item => item.start >= editor.selectionEnd && (item.end !== editor.selectionEnd || editor.selectionStart === editor.selectionEnd)) || hits[0];
+      if (onJump) onJump(hit.start, hit.end); else { editor.focus(); editor.setSelectionRange(hit.start, hit.end); }
+    }
+    function edit(text, start, end) {
+      if (onEdit) onEdit(text, start, end);
+      else { editor.value = text; editor.setSelectionRange(start, end); editor.dispatchEvent(new Event('input', { bubbles: true })); editor.focus(); }
+      updateCount();
+    }
+    function close() { bar.hidden = true; editor.focus(); }
+    events.on(bar, 'keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } });
+    events.on(input, 'input', updateCount); events.on(caseToggle, 'change', updateCount);
+    events.on(editor, 'input', () => { if (!bar.hidden) updateCount(); });
+    events.on(input, 'keydown', event => { if (event.key === 'Enter') { event.preventDefault(); next(event.shiftKey); } });
+    events.on(buttons.previous, 'click', () => next(true)); events.on(buttons.next, 'click', () => next()); events.on(buttons.close, 'click', close);
+    events.on(buttons.one, 'click', () => {
+      const hit = found().find(item => item.start === editor.selectionStart && item.end === editor.selectionEnd);
+      if (!hit) return next();
+      edit(editor.value.slice(0, hit.start) + replacement.value + editor.value.slice(hit.end), hit.start, hit.start + replacement.value.length); next();
+    });
+    events.on(buttons.all, 'click', () => { const result = replaceAll(editor.value, input.value, replacement.value, caseToggle.checked); if (result.count) edit(result.text, 0, 0); onFeedback(`已替换 ${result.count} 处，可按 Ctrl+Z 撤销。`); });
+    return { updateCount, next, close, show(replace = false) {
+      if (editor.disabled) return; bar.hidden = false; replaceRow.hidden = !replace;
+      const selection = editor.value.slice(editor.selectionStart, editor.selectionEnd); if (selection && !selection.includes('\n')) input.value = selection;
+      input.focus(); input.select(); updateCount();
+    }, destroy() { events.destroy(); cached = null; } };
+  }
+  function lineStarts(text) { const starts = [0]; for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1); return starts; }
+  function editorWindow(starts, length, scrollTop, height, lineHeight) {
+    const visible = Math.min(starts.length - 1, Math.max(0, Math.floor((scrollTop - 22) / lineHeight)));
+    const first = Math.max(0, visible - 12), last = Math.min(starts.length, visible + Math.ceil(height / lineHeight) + 13);
+    return { first, last, start: starts[first], end: starts[last] ?? length };
+  }
+  function cursorPosition(starts, offset) {
+    let low = 0, high = starts.length;
+    while (low < high) { const middle = (low + high) >>> 1; if (starts[middle] <= offset) low = middle + 1; else high = middle; }
+    const index = Math.max(0, low - 1); return { line: index + 1, column: offset - starts[index] + 1 };
+  }
+  function createEditorSurface({ editor, ids = {}, decorate, onScroll = () => {}, maxDecoratedChars = 180000, getLines = lineStarts }) {
+    const events = scope(), shell = node('div', undefined, 'editorShell'), lines = node('pre', undefined, 'lineNumbers'), numbers = node('div'), highlight = node('pre', undefined, 'highlight'), code = node('code'), cursors = node('div', undefined, 'secondaryCursors');
+    for (const [name, element] of Object.entries({ lines, numbers, highlight, code, cursors })) { if (ids[name]) element.id = ids[name]; element.setAttribute('aria-hidden', 'true'); }
+    editor.before(shell); lines.append(numbers); highlight.append(code); shell.append(lines, highlight, editor, cursors);
+    let cache = null, frame = 0, destroyed = false;
+    function render(force = false) {
+      if (destroyed) return;
+      const text = editor.value, plain = text.length > maxDecoratedChars;
+      shell.classList.toggle('plainEditor', plain);
+      if (plain) { code.textContent = ''; numbers.textContent = ''; cache = null; return; }
+      if (!cache || cache.text !== text) cache = { text, starts: getLines(text) };
+      const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
+      const view = editorWindow(cache.starts, text.length, editor.scrollTop, editor.clientHeight, lineHeight);
+      if (force || cache.first !== view.first || cache.last !== view.last) {
+        if (decorate) { const fragment = decorate(text, view); code.replaceChildren(fragment); }
+        else code.textContent = text.slice(view.start, view.end);
+        numbers.textContent = Array.from({ length: view.last - view.first }, (_, i) => view.first + i + 1).join('\n');
+        cache.first = view.first; cache.last = view.last;
+      }
+      const y = view.first * lineHeight - editor.scrollTop;
+      code.style.transform = `translate(${-editor.scrollLeft}px, ${y}px)`; numbers.style.transform = `translateY(${y}px)`;
+    }
+    function refresh() { cancelAnimationFrame(frame); frame = 0; render(true); }
+    function schedule() { if (!destroyed && !frame) frame = requestAnimationFrame(() => { frame = 0; render(true); }); }
+    events.on(editor, 'scroll', () => { render(); onScroll(); }); events.on(editor, 'input', schedule);
+    const observer = new ResizeObserver(() => { render(); onScroll(); }); observer.observe(editor); render(true);
+    return { shell, cursors, render, refresh, schedule, destroy() { destroyed = true; cancelAnimationFrame(frame); observer.disconnect(); events.destroy(); shell.before(editor); shell.remove(); } };
+  }
+  return { VERSION, node, button, icon, clampWidth, reorder, createShell, createTabs, createTree, createPopover, createEditorSurface, createQuickOpen, createFindReplace, search: { matches, replaceAll, excerpt }, lineStarts, editorWindow, cursorPosition };
+});
 
 },{}]},{},[41]);
