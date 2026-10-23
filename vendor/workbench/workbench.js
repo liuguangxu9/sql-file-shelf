@@ -1,10 +1,10 @@
-/* Tool Workbench 1.0.2 — dependency-free DOM components. */
+/* Tool Workbench 1.0.3 — dependency-free DOM components. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.ToolWorkbench = factory();
 })(typeof globalThis === 'object' ? globalThis : this, function () {
   'use strict';
-  const VERSION = '1.0.2';
+  const VERSION = '1.0.3';
   function node(tag, text, cls) {
     const element = document.createElement(tag);
     if (text !== undefined) element.textContent = text;
@@ -184,6 +184,11 @@
       else onSelect(item);
     }
     events.on(host, 'click', select);
+    events.on(host, 'focusin', event => {
+      const row = event.target.closest('[data-wb-key]');
+      if (!row || !host.contains(row)) return;
+      for (const element of rows.values()) element.tabIndex = element === row ? 0 : -1;
+    });
     events.on(host, 'keydown', event => {
       const row = event.target.closest('[data-wb-key]'); if (!row) return;
       if (event.target.closest('button')) return;
@@ -204,8 +209,14 @@
     });
     function update(next) {
       if (new Set(next.map(item => item.key)).size !== next.length) throw new Error('Tree keys must be unique');
-      const active = document.activeElement?.closest('[data-wb-key]')?._item?.key;
+      const focused = document.activeElement;
+      const activeRow = focused?.closest('[data-wb-key]');
+      const ownedFocus = activeRow && host.contains(activeRow);
+      const previousRow = ownedFocus ? activeRow : [...rows.values()].find(row => row.tabIndex === 0);
+      const previousKey = previousRow?._item?.key;
+      const previousIndex = items.findIndex(item => item.key === previousKey);
       items = next; const keys = new Set(items.map(item => item.key));
+      const focusKey = keys.has(previousKey) ? previousKey : items[Math.max(0, Math.min(previousIndex, items.length - 1))]?.key;
       for (const [key, row] of rows) if (!keys.has(key)) { row.remove(); rows.delete(key); }
       items.forEach((item, index) => {
         let row = rows.get(item.key);
@@ -214,7 +225,7 @@
         row.className = item.kind === 'folder' ? `folderRow${item.expanded ? ' open' : ''}${item.selected ? ' selected' : ''}` : `fileRow${item.depth ? ' nested' : ''}${item.selected ? ' active' : ''}`;
         row.setAttribute('role', 'treeitem'); row.setAttribute('aria-level', String((item.depth || 0) + 1)); row.setAttribute('aria-selected', String(Boolean(item.selected)));
         if (item.kind === 'folder') row.setAttribute('aria-expanded', String(Boolean(item.expanded))); else row.removeAttribute('aria-expanded');
-        row.tabIndex = active !== undefined ? (item.key === active ? 0 : -1) : index === 0 ? 0 : -1;
+        row.tabIndex = item.key === focusKey ? 0 : -1;
         row.title = item.title || item.label;
         const signature = JSON.stringify([item.kind, item.label, item.meta, item.depth, item.expanded, item.badges, item.actions]);
         if (row._signature !== signature) {
@@ -239,6 +250,8 @@
         }
         if (host.children[index] !== row) host.insertBefore(row, host.children[index] || null);
       });
+      // Restore only focus that belonged to this tree and was removed by this update.
+      if (ownedFocus && !host.contains(document.activeElement)) rows.get(focusKey)?.focus();
     }
     return { update,
       setSelected(predicate) {
