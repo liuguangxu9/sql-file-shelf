@@ -504,7 +504,7 @@ body.wb {
   border-right:1px solid var(--line);
   border-top:2px solid transparent;
   max-width:260px;
-  cursor:default;
+  cursor:pointer;
   user-select:none;
 }
 .wb .editorTab.dragging {
@@ -525,7 +525,7 @@ body.wb {
   white-space:nowrap;
 }
 .wb .editorTab>button:first-child {
-  cursor:default;
+  cursor:pointer;
 }
 .wb .editorTab .closeTab {
   flex-shrink:0;
