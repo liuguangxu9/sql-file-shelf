@@ -157,3 +157,5 @@ v29 发布完成：源码 a1e618ffc5b368c6436ee9e6f71bf779ee5c1dde；push_event 
 
 ## 2026-10-23 v33 发布
 用户明确要求“发布”。沿用仅更新 Cloudflare 的范围：名称和箭头只展开/收起，不选中；图标与行空白只选中。沿用 6 项本地定向检查，缓存升级至 v33。
+
+发布完成：源码 dbb0d6f02ee23246f37712278cb0aa2ee3614d63；Cloudflare 构建 7e138283-941d-4c0c-bf20-690287172b16 outcome=success。正式站隔离 v32 会话刷新至 v33，缓存仅保留 v33；6 项名称/箭头/图标/空白及新建位置线上交互检查通过，无页面异常。index.html/app.js/codec-worker.js/sw.js 经同源读取的换行归一化 SHA256 全部匹配本地构建。gh-pages 保持 a90da60c6c8520ddeafa227a879d39268c683850。验证只使用隔离 OPFS 示例文件。
