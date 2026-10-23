@@ -1,0 +1,42 @@
+{
+  "version": "v36",
+  "framework": "Tool Workbench 1.0.0",
+  "release_date": "2026-10-24",
+  "source_commit": "09b1a539feceee307a019270e7cc65bd151aa448",
+  "github": {
+    "repository": "https://github.com/liuguangxu9/sql-file-shelf",
+    "pages_url": "https://liuguangxu9.github.io/sql-file-shelf/",
+    "pages_commit": "3b3c547f14c1761b9d12beee63e3cd9482ef7a94",
+    "status": "built"
+  },
+  "cloudflare": {
+    "worker": "sql-file-shelf",
+    "worker_tag": "ee81026585be42f79f7ddc65ca3cbb38",
+    "url": "https://sql-file-shelf.liugx.top/",
+    "build_uuid": "b102ba77-630f-492f-9573-b82c513810f6",
+    "trigger_uuid": "9aa3e177-4e45-42ef-b958-21164cae9adb",
+    "source": "push_event",
+    "build_outcome": "success",
+    "logs_enabled": false,
+    "traces_enabled": false,
+    "runtime_note": "Assets-only Worker; script-settings.observability is null and logpush false."
+  },
+  "verification": {
+    "both_origins_https": true,
+    "seven_resources_match_local_build_each_origin": true,
+    "fresh_page_interactions": true,
+    "cloudflare_existing_v35_session_upgraded": true,
+    "offline_reload_both_origins": true,
+    "user_directory_accessed": false,
+    "notes": "Production checks used a separate browser session without user file authorization."
+  },
+  "resource_hashes_lf_normalized": {
+    "app.css": "d70594b2bc91280053576f3986cf368993a5b27b0caa885cf8eaddd758c796f0",
+    "app.js": "e96d192492d397dd284aa7ec8c450261bd014a68e8315562c7929877d784e1b6",
+    "codec-worker.js": "55a8292ccef63585c5ba07fb8a7e65e11c1176b3d5c7b6339a21b13a8f44e667",
+    "favicon.png": "6376492e1811a836c9c38c5f62d1f44d47fc36199a45abacfec040ccd423a139",
+    "manifest.webmanifest": "daedcb2034c5f116884f58082159289dfee57a86b05887eb8a8a16e4e4ef247d",
+    "sw.js": "c7bb12373839391f4fb7fde7c90ab1eebe20401c39cc31fb0a9581ba1550fb7b",
+    "workbench.css": "095c98870ffe3f4aaff250e1cbf00af14918675dcabaa3a302ff0206900ef7e0"
+  }
+}
