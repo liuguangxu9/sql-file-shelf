@@ -102,7 +102,7 @@ async function permission(handle) {
 function updateEditorInfo() {
   const active = state.active;
   const disabled = !active;
-  ["save", "saveAs", "encodingSelect"].forEach((id) => {
+  ["save", "saveAs", "encodingSelect", "findFile", "replaceFile"].forEach((id) => {
     $(id).disabled = disabled;
   });
   if (!active) {
@@ -798,23 +798,24 @@ async function renderFiles() {
       content.append(arrow, icon, pick);
       const rename = document.createElement("button");
       rename.className = "fileAction folderRename";
-      rename.textContent = "✎";
+      rename.textContent = "⋯";
       rename.title = `重命名目录 ${node.path}`;
       rename.setAttribute("aria-label", rename.title);
       rename.addEventListener("click", event => { event.stopPropagation(); renameFolder(node.folder); });
-      content.append(rename);
-      if (node.folder.empty) {
-        const remove = document.createElement("button");
-        remove.className = "fileDelete folderDelete";
-        remove.title = `删除空目录 ${node.path}`;
-        remove.setAttribute("aria-label", remove.title);
-        remove.textContent = "×";
-        remove.addEventListener("click", (event) => {
-          event.stopPropagation();
-          deleteFolder(node.folder);
-        });
-        content.append(remove);
-      }
+      const actions = document.createElement("div");
+      actions.className = "folderActions";
+      const remove = document.createElement("button");
+      remove.className = "fileDelete folderDelete";
+      remove.disabled = !node.folder.empty;
+      remove.title = node.folder.empty ? `删除空目录 ${node.path}` : "只能删除空目录";
+      remove.setAttribute("aria-label", remove.title);
+      remove.textContent = "×";
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteFolder(node.folder);
+      });
+      actions.append(rename, remove);
+      content.append(actions);
       row.append(content);
       fragment.append(row);
       continue;

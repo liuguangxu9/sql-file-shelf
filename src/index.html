@@ -75,7 +75,7 @@
         font-weight: 600;
         cursor: pointer;
       }
-      button:hover {
+      button:not(:disabled):hover {
         border-color: #a9c5fb;
       }
       button.primary {
@@ -159,7 +159,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .fileDelete:hover {
+      .fileDelete:not(:disabled):hover {
         color: var(--danger);
       }
       .fileAction {
@@ -169,10 +169,10 @@
         border: 0;
         background: transparent;
         padding: 0;
-        color: #60718b;
+        color: #9aa5b5;
         line-height: 1;
       }
-      .fileAction:hover {
+      .fileAction:not(:disabled):hover {
         color: var(--blue);
       }
       .fileDialog {
@@ -276,7 +276,7 @@
         padding: 8px;
         border-radius: 6px;
       }
-      .result:hover {
+      .result:not(:disabled):hover {
         background: var(--soft);
       }
       .result strong,
@@ -312,7 +312,7 @@
         padding: 7px 9px;
         text-align: left;
       }
-      .sortMenu button:hover, .sortMenu button.selected { background: var(--blue-soft); }
+      .sortMenu button:not(:disabled):hover, .sortMenu button.selected { background: var(--blue-soft); }
       .sortMenuDivider { height: 1px; margin: 5px 0; background: var(--line); }
       .fileTree { min-width: 0; }
       .fileTree > div { border-bottom: 1px solid #f0f3f7; }
@@ -333,7 +333,7 @@
         background: transparent;
         color: #647b99;
       }
-      .treeToggle:hover { background: #e8f0fb; color: #235caf; }
+      .treeToggle:not(:disabled):hover { background: #e8f0fb; color: #235caf; }
       .treeToggle svg { display: block; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; transform: rotate(0deg); }
       .folderRow.open .treeToggle svg { transform: rotate(90deg); }
       .folderIcon { width: 17px; height: 17px; flex: 0 0 17px; margin: 0 6px 0 5px; fill: #e7eef8; stroke: #6886ae; stroke-width: 1.5; }
@@ -352,7 +352,7 @@
         text-align: left;
         font-size: 14px;
       }
-      .folderPick:hover { color: var(--blue); }
+      .folderPick:not(:disabled):hover { color: var(--blue); }
       .fileRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 6px 10px 5px; cursor: pointer; background: #fff; transition: background-color .18s ease, box-shadow .18s ease; }
       .fileRow .fileNameCell { grid-column: 1; grid-row: 1; }
       .fileRow .fileMeta { grid-column: 1; grid-row: 2; }
@@ -587,14 +587,14 @@
       button:disabled { opacity:.45; cursor:default; }
 
       .workspaceSwitch { display:flex; align-items:center; justify-content:flex-start; justify-self:start; gap:8px; width:fit-content; max-width:240px; min-width:0; border-color:transparent; background:transparent; color:#35435a; font-size:14px; font-weight:600; }
-      .workspaceSwitch:hover,.workspaceSwitch[aria-expanded="true"] { background:#edf0f5; border-color:transparent; }
+      .workspaceSwitch:not(:disabled):hover,.workspaceSwitch[aria-expanded="true"] { background:#edf0f5; border-color:transparent; }
       #workspaceName { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .workspaceChevron { flex-shrink:0; width:12px; height:12px; fill:none; stroke:#8a95a6; stroke-width:1.5; }
       .workspaceMenu { position:fixed; inset:auto; margin:0; width:min(300px,calc(100vw - 24px)); padding:6px; border:1px solid #e3e8ef; border-radius:10px; background:#fff; color:var(--ink); box-shadow:0 10px 32px #2430471a; }
       .workspaceMenu::backdrop { background:transparent; }
       .workspaceMenuList { max-height: min(320px,50vh); overflow-y:auto; }
       .workspaceOption { display:flex; align-items:center; gap:10px; width:100%; padding:0 10px; height:38px; border:0; background:transparent; text-align:left; font-size:13px; color:#536078; }
-      .workspaceOption:hover,.workspaceOption:focus-visible { background:#f1f4f9; }
+      .workspaceOption:not(:disabled):hover,.workspaceOption:focus-visible { background:#f1f4f9; }
       .workspaceOption[aria-checked="true"] { color:#3265bc; background:#f0f5fe; }
       .workspaceOption .workspaceOptionName { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .workspaceCheck { width:16px; font-size:14px; }
@@ -607,13 +607,13 @@
       .navigationHidden > .navigation,.navigationHidden > .resizer { display:none; }
       .navigation { background:#f9fafc; }
       .navigationToggle { display:flex; align-items:center; gap:6px; border:1px solid transparent; background:transparent; color:#8490a1; width:30px; height:30px; justify-content:center; padding:0; white-space:nowrap; }
-      .navigationToggle:hover { background:#edf0f5; color:#536078; }
+      .navigationToggle:not(:disabled):hover { background:#edf0f5; color:#536078; }
       .navigationToggle svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.5; }
       .navigationToggle .sidebarArrow { transform-origin:11.5px 10px; transition:transform .15s; }
       .navigationToggle.collapsed .sidebarArrow { transform:rotate(180deg); }
       .treeToggle svg { transition:transform .12s ease; }
-      .folderRename { opacity:0; font-size:14px; }
-      .folderRow:hover .folderRename,.folderRow:focus-within .folderRename { opacity:1; }
+      .folderActions { display:flex; align-items:center; gap:0; opacity:0; }
+      .folderRow:hover .folderActions,.folderRow:focus-within .folderActions { opacity:1; }
       .navigation .panelHead { height:48px; flex-basis:48px; padding:8px 12px; border:0; }
       .navigation .panelTitle { margin:0; font-weight:500; }
       #navViews { order:-2; display:flex; gap:4px; padding:12px 12px 8px; }
@@ -678,7 +678,7 @@
       .result strong { font-size:13px; font-weight:550; }
       .result code { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:8px; font:12px Consolas,monospace; color:#597295; }
       .collectionItem { display:block; text-align:left; border:0; background:transparent; width:100%; height:auto; padding:12px 16px; }
-      .collectionItem:hover { background:#eaf0fa; }
+      .collectionItem:not(:disabled):hover { background:#eaf0fa; }
       .collectionItem strong,.collectionItem small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .collectionItem strong { font-size:13px; font-weight:500; }.collectionItem small { color:#8793a5; margin-top:5px; font-size:10px; }
       #findBar { padding:10px 16px; background:#f7f9fc; border-bottom:1px solid var(--line); flex-shrink:0; }
@@ -781,7 +781,7 @@
               </div>
               <div class="saveControls">
                 <button id="favoriteFile" disabled>☆ 收藏</button>
-                <button id="findFile">查找</button><button id="replaceFile">替换</button>
+                <button id="findFile" disabled>查找</button><button id="replaceFile" disabled>替换</button>
                 <select id="encodingSelect" disabled aria-label="保存编码">
                   <option value="utf-8">UTF-8</option>
                   <option value="utf-16le">UTF-16 LE</option>
@@ -819,6 +819,6 @@
     <dialog id="workspaceDialog" class="workspaceDialog"><header class="dialogHeader"><strong>管理工作区</strong><button id="closeWorkspaces" aria-label="关闭工作区管理">×</button></header><div id="workspaceActions"></div></dialog>
     <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
     <div id="navViews"><button data-view="files" class="active">文件</button><button data-view="recent">最近</button><button data-view="favorites">收藏</button></div><div id="collectionList" class="scroll" hidden></div>
-    <script src="./app.js?v=28"></script>
+    <script src="./app.js?v=29"></script>
   </body>
 </html>
