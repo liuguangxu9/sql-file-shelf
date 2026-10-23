@@ -1,0 +1,38 @@
+{
+  "version": "v37",
+  "framework": "1.0.1",
+  "date": "2026-10-24",
+  "source_commit": "27a6c0e0c801dbe181e3935a6df1a161939672da",
+  "pages_commit": "14cd5692d25f74e89ebcb5135ce2d95dc5228109",
+  "cloudflare_build": "2506f2b4-5556-4017-ac2b-878bfbaeef8b",
+  "build_outcome": "success",
+  "urls": [
+    "https://liuguangxu9.github.io/sql-file-shelf/",
+    "https://sql-file-shelf.liugx.top/"
+  ],
+  "fixes": [
+    "Navigation search keeps a 32px height under long collections.",
+    "Sidebar minimum 280px applies to restored settings, mouse drag and keyboard.",
+    "Toolbar wraps inside the sidebar.",
+    "Tabs use default cursor until dragstart and restore on dragend or cancel."
+  ],
+  "checks": {
+    "framework_rules": 4,
+    "sizing_and_cursor_browser": 10,
+    "tab_drag_regression": 15,
+    "narrow_screen": 10,
+    "real_pointer_minimum": true,
+    "both_origins_resources_match_build": true,
+    "both_origins_sizing_stress": true,
+    "cloudflare_v36_session_upgraded": true
+  },
+  "resources": {
+    "app.css": "33580529442dc772b4b06c9236baeff66885f2ba013b7a2e6471648a597fb6c8",
+    "app.js": "8d0fcba70bca51a42948b04e088922819c68026cae9b83128616e31ab319dfc1",
+    "codec-worker.js": "55a8292ccef63585c5ba07fb8a7e65e11c1176b3d5c7b6339a21b13a8f44e667",
+    "favicon.png": "6376492e1811a836c9c38c5f62d1f44d47fc36199a45abacfec040ccd423a139",
+    "manifest.webmanifest": "daedcb2034c5f116884f58082159289dfee57a86b05887eb8a8a16e4e4ef247d",
+    "sw.js": "1ddce1a0a31836b83b5427512595c6f12f6f243f6864060d49834a62bd21493b",
+    "workbench.css": "83dc6bb7c47dd4d02f0212f82ba8a79f6a8169fe523557ed6ea4541edfada68b"
+  }
+}
