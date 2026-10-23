@@ -1,10 +1,10 @@
-// Isolated OPFS test origin only. Seed fixture, activate v36, set browser offline, reload, then evaluate.
+// Isolated OPFS test origin only. Seed fixture, activate v37, set browser offline, reload, then evaluate.
 (async()=>{
   const checks=[],assert=(value,label)=>{if(!value)throw Error(label);checks.push(label);};
   assert(navigator.onLine===false,'browser is offline');
   assert(!!document.querySelector('link[href="./workbench.css?v=36"]'),'updated shell loads framework CSS');
   assert(getComputedStyle(document.querySelector('.app')).borderRadius==='12px','framework styling is present offline');
-  const cache=await caches.open('sql-file-shelf-v36');
+  const cache=await caches.open('sql-file-shelf-v37');
   for(const resource of ['./app.js?v=36','./workbench.css?v=36','./app.css?v=36','./codec-worker.js?v=36'])assert(!!await cache.match(resource),resource+' is precached');
   const root=await navigator.storage.getDirectory(),directory=await root.getDirectoryHandle('SQL 演示工作区');
   const handle=await directory.getFileHandle('离线大文件.sql',{create:true});

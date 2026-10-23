@@ -98,3 +98,10 @@ GitHub Pages 采用 `gh-pages` 发布分支：`main` 保存源码，`gh-pages` �
 - GitHub Pages：<https://liuguangxu9.github.io/sql-file-shelf/>，由 gh-pages 静态产物发布。
 - Cloudflare：<https://sql-file-shelf.liugx.top/>，由 main 推送触发既有源码构建。
 - 框架固定快照随应用源码一起交付，构建不依赖 Codex-Home 外部目录。发布核对记录维护于本项目 release-v36.json。
+
+
+## v37 侧栏尺寸与标签光标（2026-10-24）
+
+框架升级到 1.0.1。修复最近/收藏项较多时搜索框被 Flex 挤扁的问题：导航控件保留高度，仅列表视口缩放和滚动。侧栏宽度下限为 280px，旧设置、拖动和键盘操作统一限制；工具栏空间不足时换行，避免控件被覆盖。标签悬停保持普通箭头，开始拖动后才显示抓手，拖动结束或取消后恢复。
+
+针对性回归见 tests/browser-ui-sizing.js；发布沿用 GitHub Pages 与 Cloudflare 双渠道。

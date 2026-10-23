@@ -236,6 +236,7 @@ module.exports = function setupWorkbench(api) {
   const manager = $('workspaceDialog');
   const shell = UI.createShell({
     root: document.querySelector('.app'), layout, navigation: filePanel,
+    minNavigationWidth: 280,
     content: document.querySelector('.editorPanel'), toggle: $('toggleNavigation'), splitter: $('navigationSplitter'),
     onChange(value) {
       Promise.all([put('layout', { files: `${value.width}px` }), put('navigationHidden', value.hidden)])

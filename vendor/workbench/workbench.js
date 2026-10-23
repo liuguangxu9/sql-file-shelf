@@ -1,10 +1,10 @@
-/* Tool Workbench 1.0.0 — dependency-free DOM components. */
+/* Tool Workbench 1.0.1 — dependency-free DOM components. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.ToolWorkbench = factory();
 })(typeof globalThis === 'object' ? globalThis : this, function () {
   'use strict';
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   function node(tag, text, cls) {
     const element = document.createElement(tag);
     if (text !== undefined) element.textContent = text;
@@ -50,14 +50,15 @@
     next.splice(Math.max(0, Math.min(next.length, index)), 0, moving);
     return next;
   }
-  function createShell({ root, layout, navigation, content, toggle, splitter, onChange = () => {} }) {
+  function createShell({ root, layout, navigation, content, toggle, splitter, minNavigationWidth = 220, minContentWidth = 300, onChange = () => {} }) {
     const events = scope();
     root.classList.add('wb', 'wb-shell'); layout.classList.add('wb-layout');
     navigation.classList.add('navigation'); content.classList.add('wb-content');
     let drag = null, destroyed = false;
-    const maximum = () => Math.max(180, Math.min(700, layout.clientWidth - 300));
+    const minimum = Math.max(160, Number(minNavigationWidth) || 220);
+    const maximum = () => Math.max(minimum, Math.min(700, layout.clientWidth - minContentWidth - splitter.getBoundingClientRect().width));
     function width(value, notify = false) {
-      const next = clampWidth(value, maximum());
+      const next = clampWidth(value, maximum(), minimum);
       root.style.setProperty('--files-width', `${next}px`);
       splitter.setAttribute('aria-valuenow', String(Math.round(next)));
       splitter.setAttribute('aria-valuemax', String(maximum()));
@@ -73,7 +74,7 @@
     }
     splitter.classList.add('resizer'); splitter.tabIndex = 0;
     splitter.setAttribute('role', 'separator'); splitter.setAttribute('aria-orientation', 'vertical');
-    splitter.setAttribute('aria-valuemin', '220'); splitter.setAttribute('aria-label', '调整目录宽度');
+    splitter.setAttribute('aria-valuemin', String(minimum)); splitter.setAttribute('aria-label', '调整目录宽度');
     events.on(toggle, 'click', () => hidden(!layout.classList.contains('navigationHidden'), true));
     events.on(splitter, 'pointerdown', event => {
       if (event.button !== 0) return;
@@ -91,7 +92,7 @@
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const now = Number.parseFloat(root.style.getPropertyValue('--files-width'));
-      width(event.key === 'Home' ? 220 : event.key === 'End' ? maximum() : now + (event.key === 'ArrowLeft' ? -10 : 10), true);
+      width(event.key === 'Home' ? minimum : event.key === 'End' ? maximum() : now + (event.key === 'ArrowLeft' ? -10 : 10), true);
     });
     events.on(window, 'resize', () => width(root.style.getPropertyValue('--files-width')));
     width(280);
@@ -106,7 +107,7 @@
     indicator.hidden = true; indicator.setAttribute('aria-hidden', 'true'); document.body.append(indicator);
     const empty = node('span', placeholder, 'tabsPlaceholder');
     function clearDrop() { dropIndex = null; indicator.hidden = true; cancelAnimationFrame(frame); frame = 0; }
-    function finish() { clearDrop(); rows.get(dragging)?.classList.remove('dragging'); dragging = null; }
+    function finish() { clearDrop(); rows.get(dragging)?.classList.remove('dragging'); host.classList.remove('wb-tab-dragging'); dragging = null; }
     function showDrop(x) {
       const remaining = items.filter(item => item.key !== dragging);
       const before = remaining.findIndex(item => { const box = rows.get(item.key).getBoundingClientRect(); return x < box.left + box.width / 2; });
@@ -140,7 +141,7 @@
     events.on(host, 'dragstart', event => {
       const row = record(event.target); if (!row) return;
       dragging = row._key; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(dragging));
-      row.classList.add('dragging');
+      row.classList.add('dragging'); host.classList.add('wb-tab-dragging');
     });
     events.on(host, 'dragover', event => { if (dragging === null) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; dragX = event.clientX; showDrop(dragX); if (!frame) frame = requestAnimationFrame(scroll); });
     events.on(host, 'dragleave', event => { if (!host.contains(event.relatedTarget)) clearDrop(); });
