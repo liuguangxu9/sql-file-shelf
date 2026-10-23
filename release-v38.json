@@ -1,0 +1,25 @@
+{
+  "version": "v38",
+  "framework": "1.0.2",
+  "date": "2026-10-24",
+  "source_commit": "f8deac0aecda6ca8af9f03707e932e49b85bf047",
+  "pages_commit": "7ba722b55203a827cb6c92b91d3c3359e3d67909",
+  "cloudflare_build": "67ea0efc-9def-4fe4-a9d8-89fcc0cfd50f",
+  "outcome": "success",
+  "user_clarification": "Tab hover should use the same click-hand cursor as other controls, rather than an arrow or a grab cursor.",
+  "implementation": {
+    "hover": "pointer",
+    "dragging": "grabbing",
+    "end_or_cancel": "pointer"
+  },
+  "checks": {
+    "component_cursor_lifecycle": 3,
+    "github_production": 4,
+    "cloudflare_production": 4,
+    "build_integrity": true
+  },
+  "urls": [
+    "https://liuguangxu9.github.io/sql-file-shelf/",
+    "https://sql-file-shelf.liugx.top/"
+  ]
+}
