@@ -1,10 +1,10 @@
-/* Tool Workbench 1.0.1 — dependency-free DOM components. */
+/* Tool Workbench 1.0.2 — dependency-free DOM components. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.ToolWorkbench = factory();
 })(typeof globalThis === 'object' ? globalThis : this, function () {
   'use strict';
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.2';
   function node(tag, text, cls) {
     const element = document.createElement(tag);
     if (text !== undefined) element.textContent = text;

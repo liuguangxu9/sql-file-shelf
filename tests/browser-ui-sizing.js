@@ -33,12 +33,12 @@
     document.querySelector(`.fileRow[data-path="${name}"]`).click(); await wait(() => $('fileTitle').textContent === name);
   }
   const row = $('editorTabs').querySelector('.editorTab'), pick = row.firstElementChild;
-  assert(getComputedStyle(row).cursor === 'default' && getComputedStyle(pick).cursor === 'default', 'hovering a tab uses the normal arrow');
+  assert(getComputedStyle(row).cursor === 'pointer' && getComputedStyle(pick).cursor === 'pointer', 'hovering a tab uses the same pointer as other controls');
   assert(getComputedStyle(row.lastElementChild).cursor === 'pointer', 'tab close keeps its action cursor');
   const transfer = new DataTransfer();
   row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer }));
   assert(getComputedStyle(pick).cursor === 'grabbing', 'grab cursor begins only when dragging starts');
   row.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: transfer }));
-  assert(getComputedStyle(pick).cursor === 'default' && !$('editorTabs').classList.contains('wb-tab-dragging'), 'ending or cancelling drag restores the arrow');
+  assert(getComputedStyle(pick).cursor === 'pointer' && !$('editorTabs').classList.contains('wb-tab-dragging'), 'ending or cancelling drag restores the pointer');
   return { passed: checks.length, checks };
 })()
