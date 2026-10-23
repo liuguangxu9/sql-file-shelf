@@ -95,7 +95,22 @@ module.exports = function setupWorkbench(api) {
       start: editor.selectionStart, end: editor.selectionEnd,
       top: editor.scrollTop, left: editor.scrollLeft, history: state.editorHistory });
   }
+  function updateLocation() {
+    const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+    const path = workspace && state.selectedFolders.get(workspace.id);
+    const text = workspace ? `当前目录：${workspace.name}${path ? ' / ' + path : ''}` : '尚未选择本地目录';
+    $('workspaceLocation').textContent = text;
+    $('workspaceLocation').title = text;
+  }
+  function selectFileDirectory(file) {
+    const slash = file.path.lastIndexOf('/');
+    const path = slash < 0 ? '' : file.path.slice(0, slash);
+    const changed = (state.selectedFolders.get(file.workspaceId) || '') !== path;
+    state.selectedFolders.set(file.workspaceId, path);
+    return changed;
+  }
   function sync() {
+    updateLocation();
     const tab = activeTab();
     if (tab) tab.dirty = state.dirty;
     renderTabs();
@@ -150,8 +165,14 @@ module.exports = function setupWorkbench(api) {
     if (!tabs.length) tabBar.append(node('span', '工作台', 'tabsPlaceholder'));
   }
   function activate(tab) {
-    if (tab.file === state.active) return;
+    if (tab.file === state.active && state.activeWorkspaceId === tab.file.workspaceId) {
+      if (selectFileDirectory(tab.file)) renderFiles();
+      updateLocation();
+      setStatus(`已打开 ${tab.file.name}。`);
+      return;
+    }
     const workspaceChanged = state.activeWorkspaceId !== tab.file.workspaceId;
+    const directoryChanged = selectFileDirectory(tab.file);
     capture();
     state.fileOpenVersion++;
     state.active = tab.file;
@@ -170,9 +191,11 @@ module.exports = function setupWorkbench(api) {
     if (workspaceChanged) {
       api.render();
       put('activeWorkspaceId', state.activeWorkspaceId);
-    }
+    } else if (directoryChanged) renderFiles();
+    setStatus(`已打开 ${tab.file.name}。`);
   }
   function opened() {
+    if (selectFileDirectory(state.active)) renderFiles();
     let tab = activeTab();
     if (!tab) { tab = { file: state.active }; tabs.push(tab); }
     capture(); sync();
@@ -526,9 +549,7 @@ module.exports = function setupWorkbench(api) {
       $('workspaceName').textContent = state.workspaces.find(w => w.id === state.activeWorkspaceId)?.name || '选择工作区';
       $('manageWorkspaces').title = $('workspaceName').textContent;
       if (workspaceMenu.matches(':popover-open')) renderWorkspaceMenu();
-      const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
-      $('workspaceLocation').textContent = workspace ? `当前目录：${workspace.name}${state.selectedFolders.get(workspace.id) ? ' / ' + state.selectedFolders.get(workspace.id) : ''}` : '尚未选择本地目录';
-      $('workspaceLocation').title = '浏览器仅提供授权目录名称和相对路径，不暴露完整磁盘路径';
+      updateLocation();
       renderCollection(); sync();
     },
   };

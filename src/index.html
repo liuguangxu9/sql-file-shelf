@@ -318,7 +318,7 @@
       .fileTree > div { border-bottom: 1px solid #f0f3f7; }
       .folderRow { padding: 5px 10px; background: #fafbfd; cursor: pointer; transition: background-color .18s ease, box-shadow .18s ease; }
       .folderRow.open { background: #f8faff; }
-      .folderRow.selected { background: #eef4fc; box-shadow: inset 2px 0 #9dc3f2; }
+      .folderRow.selected { box-shadow: inset 2px 0 #9dc3f2; }
       .folderRow:hover { background: #edf3fb; }
       .treeNameCell { display: flex; align-items: center; min-width: 0; }
       .treeToggle {
@@ -578,7 +578,7 @@
       [hidden] { display: none !important; }
       :root { --files-width: 280px; --ink: #243047; --line: #e7ebf1; }
       body { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
-      .app { grid-template-rows: 56px 1fr 29px; }
+      .app { grid-template-rows: 56px minmax(0,1fr) 29px; }
       .top { display:grid; grid-template-columns:auto minmax(0,1fr) minmax(60px,330px); gap:12px; padding:0 16px; background:#f9fafc; }
       .topStart { display:flex; align-items:center; gap:8px; min-width:0; padding-right:16px; border-right:1px solid var(--line); }
       .brand { display:flex; align-items:center; font-size:13px; font-weight:500; color:#788396; letter-spacing:.2px; }
@@ -626,6 +626,12 @@
       .fileRow .fileNameText, .folderPick { font-weight:500; font-size:13px; }
       .folderRow { background:transparent; }
       .folderRow.open { background:transparent; }
+      .folderRow.selected, .folderRow.selected:hover { background:transparent; }
+      .folderPick { display:flex; align-items:center; gap:13px; }
+      .folderName { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .folderCounts { display:flex; flex-shrink:0; align-items:center; gap:12px; color:#8b96a6; font-size:11px; font-weight:400; font-variant-numeric:tabular-nums; }
+      .folderCount { display:flex; align-items:center; gap:4px; }
+      .folderCount svg { width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:1.25; stroke-linecap:round; stroke-linejoin:round; }
       .fileRow.active { background:#e8effc; box-shadow:inset 2px 0 #3971db; }
       .fileRowActions { gap:0; opacity:0; }
       .fileRow:hover .fileRowActions,.fileRow:focus-within .fileRowActions { opacity:1; }
@@ -648,17 +654,20 @@
       .meta { font-size:10px; gap:7px; }
       .saveControls { gap:5px; }
       .saveControls button { font-size:11px; height:28px; padding:0 8px; }
-      .saveControls select { width:92px; height:28px; font-size:11px; }
+      .encodingControl { position:relative; flex-shrink:0; }
+      #encodingButton { min-width:92px; font-size:12px; }
+      #encodingMenu { left:auto; right:0; }
+      #encodingMenu button { height:32px; padding:7px 9px; font-size:12px; }
       .editorPanel { position:relative; min-width:0; }
       #emptyEditor { position:absolute; top:116px; bottom:0; left:0; right:0; z-index:5; background:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:24px; text-align:center; }
       #emptyEditor p { color:#8b95a6; font-size:13px; margin:12px 0 24px; }
       #emptyEditor button { margin:0 5px; height:36px; }
       .shortcutHints { display:flex; gap:20px; margin:36px 0 22px; color:#8b95a6; font-size:11px; }
       #emptyEditor small { color:#a0a9b7; font-size:11px; }
-      .status { display:flex; align-items:center; gap:18px; padding:0 14px; font-size:10px; background:#f9fafc; }
-      #status { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      #workspaceLocation { max-width:27%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      #saveState,#cursorStatus { white-space:nowrap; }
+      .status { position:relative; z-index:4; min-width:0; overflow:hidden; display:flex; align-items:center; gap:18px; padding:0 14px; font-size:10px; background:#f9fafc; }
+      #status { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #workspaceLocation { flex:0 1 auto; min-width:0; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #saveState,#cursorStatus { flex-shrink:0; white-space:nowrap; }
       .unsaved { color:#b67a23; }
       .workspaceDialog,.searchDialog { border:1px solid #dfe5ef; border-radius:14px; padding:0; box-shadow:0 24px 90px #23365630; color:var(--ink); }
       dialog::backdrop { background:#182c4d45; backdrop-filter:blur(3px); }
@@ -782,7 +791,10 @@
               <div class="saveControls">
                 <button id="favoriteFile" disabled>☆ 收藏</button>
                 <button id="findFile" disabled>查找</button><button id="replaceFile" disabled>替换</button>
-                <select id="encodingSelect" disabled aria-label="保存编码">
+                <span class="encodingControl">
+                <button id="encodingButton" disabled aria-label="保存编码：UTF-8" aria-haspopup="menu" aria-expanded="false" aria-controls="encodingMenu">UTF-8 ▾</button>
+                <span id="encodingMenu" class="sortMenu" role="menu" aria-label="保存编码" hidden></span>
+                <select id="encodingSelect" hidden disabled aria-label="保存编码">
                   <option value="utf-8">UTF-8</option>
                   <option value="utf-16le">UTF-16 LE</option>
                   <option value="utf-16be">UTF-16 BE</option>
@@ -792,6 +804,7 @@
                   <option value="windows-1251">Windows-1251</option>
                   <option value="shift_jis">Shift_JIS</option>
                 </select>
+                </span>
                 <button id="save" class="primary" disabled>保存</button>
                 <button id="saveAs" disabled>另存为</button>
               </div>

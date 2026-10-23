@@ -44,6 +44,7 @@ const makeId = () =>
 const extension = (name) => name.split(".").pop().toLowerCase();
 const setStatus = (text, error = false) => {
   $("status").textContent = text;
+  $("status").title = text;
   $("status").classList.toggle("error", error);
 };
 const markDirty = (dirty) => {
@@ -102,10 +103,11 @@ async function permission(handle) {
 function updateEditorInfo() {
   const active = state.active;
   const disabled = !active;
-  ["save", "saveAs", "encodingSelect", "findFile", "replaceFile"].forEach((id) => {
+  ["save", "saveAs", "encodingSelect", "encodingButton", "findFile", "replaceFile"].forEach((id) => {
     $(id).disabled = disabled;
   });
   if (!active) {
+    closeEncodingMenu();
     $("encoding").textContent = "—";
     $("bom").textContent = "—";
     $("newline").textContent = "—";
@@ -118,6 +120,7 @@ function updateEditorInfo() {
   $("newline").textContent =
     active.newline === "crlf" ? "CRLF" : active.newline === "cr" ? "CR" : "LF";
   $("encodingSelect").value = active.metadata.encoding;
+  updateEncodingMenu();
 }
 
 function setFileIdentity(name, path) {
@@ -781,7 +784,32 @@ async function renderFiles() {
       });
       const pick = document.createElement("button");
       pick.className = "folderPick";
-      pick.textContent = node.path ? node.path.split("/").pop() : workspace.name;
+      const name = document.createElement("span");
+      name.className = "folderName";
+      name.textContent = node.path ? node.path.split("/").pop() : workspace.name;
+      pick.append(name);
+      const counts = document.createElement("span");
+      counts.className = "folderCounts";
+      for (const [kind, label, shape] of [
+        ["folders", "个子目录", 'M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z'],
+        ["files", "个文件", 'M9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9.5 2ZM9 2v4h4'],
+      ]) {
+        if (!node.counts[kind]) continue;
+        const count = document.createElement("span");
+        count.className = "folderCount";
+        count.title = `${node.counts[kind]} ${label}（直属${kind === "files" ? " SQL、TXT、MD" : ""}）`;
+        count.setAttribute("aria-label", count.title);
+        const countIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        countIcon.setAttribute("viewBox", kind === "folders" ? "0 0 20 20" : "0 0 16 16");
+        countIcon.setAttribute("aria-hidden", "true");
+        const countPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        countPath.setAttribute("d", shape);
+        countIcon.append(countPath);
+        count.append(countIcon, String(node.counts[kind]));
+        counts.append(count);
+      }
+      if (!counts.children.length) { counts.textContent = "空"; counts.title = "没有直属子目录或 SQL、TXT、MD 文件"; }
+      pick.append(counts);
       pick.title = `${isOpen ? "收起" : "展开"} ${node.path || workspace.name}，并选为新建位置`;
       pick.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -1588,6 +1616,61 @@ $("editor").addEventListener("keydown", (event) => {
   editor.setRangeText(change.replacement, change.replaceStart, change.replaceEnd, "preserve");
   editor.setSelectionRange(change.selectionStart, change.selectionEnd, direction);
   editor.dispatchEvent(new Event("input", { bubbles: true }));
+});
+function closeEncodingMenu(restoreFocus = false) {
+  $("encodingMenu").hidden = true;
+  $("encodingButton").setAttribute("aria-expanded", "false");
+  if (restoreFocus) $("encodingButton").focus();
+}
+function updateEncodingMenu() {
+  const select = $("encodingSelect");
+  const label = select.selectedOptions[0]?.textContent || select.value;
+  $("encodingButton").textContent = `${label} ▾`;
+  $("encodingButton").setAttribute("aria-label", `保存编码：${label}`);
+  for (const option of $("encodingMenu").children) {
+    const selected = option.dataset.encoding === select.value;
+    option.classList.toggle("selected", selected);
+    option.setAttribute("aria-checked", String(selected));
+  }
+}
+for (const option of $("encodingSelect").options) {
+  const button = document.createElement("button");
+  button.textContent = option.textContent;
+  button.dataset.encoding = option.value;
+  button.setAttribute("role", "menuitemradio");
+  button.tabIndex = -1;
+  button.addEventListener("click", () => {
+    if (!state.active || $("encodingButton").disabled) return;
+    if ($("encodingSelect").value !== option.value) {
+      $("encodingSelect").value = option.value;
+      changeEncoding();
+    }
+    closeEncodingMenu(true);
+  });
+  $("encodingMenu").append(button);
+}
+$("encodingButton").addEventListener("click", () => {
+  if (!$("encodingMenu").hidden) return closeEncodingMenu();
+  updateEncodingMenu();
+  $("encodingMenu").hidden = false;
+  $("encodingButton").setAttribute("aria-expanded", "true");
+  $("encodingMenu").querySelector(".selected")?.focus();
+});
+$("encodingButton").parentElement.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    event.preventDefault(); event.stopPropagation(); closeEncodingMenu(true);
+  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault(); event.stopPropagation();
+    if ($("encodingButton").disabled) return;
+    if ($("encodingMenu").hidden) { $("encodingButton").click(); return; }
+    const options = [...$("encodingMenu").children];
+    const index = options.indexOf(document.activeElement);
+    options[event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
+      : (index + (event.key === "ArrowUp" ? -1 : 1) + options.length) % options.length].focus();
+  } else if (event.key === "Tab") closeEncodingMenu();
+});
+document.addEventListener("click", event => {
+  if (!event.target.closest(".encodingControl")) closeEncodingMenu();
 });
 $("encodingSelect").addEventListener("change", changeEncoding);
 $("save").addEventListener("click", () => runWrite(save));

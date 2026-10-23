@@ -47,6 +47,13 @@ function buildFileTree(folders, entries, options = {}) {
     const slash = path.lastIndexOf("/");
     return slash < 0 ? "" : path.slice(0, slash);
   };
+  const counts = new Map(folders.map(folder => [folder.path, { folders: 0, files: 0 }]));
+  for (const folder of folders) {
+    if (folder.path && counts.has(parentPath(folder.path))) counts.get(parentPath(folder.path)).folders++;
+  }
+  for (const entry of entries) {
+    if (counts.has(parentPath(entry.path))) counts.get(parentPath(entry.path)).files++;
+  }
   const paths = new Set(folders.map((folder) => folder.path));
   const scope = paths.has(options.scope) ? options.scope : "";
   const withinScope = (path) =>
@@ -97,7 +104,7 @@ function buildFileTree(folders, entries, options = {}) {
   const expanded = new Set(options.expanded || [""]);
   const rows = [];
   function visit(folder, depth) {
-    rows.push({ kind: "folder", path: folder.path, depth, folder });
+    rows.push({ kind: "folder", path: folder.path, depth, folder, counts: counts.get(folder.path) || { folders: 0, files: 0 } });
     if (!query && !expanded.has(folder.path)) return;
     for (const child of folderChildren.get(folder.path) || []) visit(child, depth + 1);
     for (const entry of fileChildren.get(folder.path) || [])
