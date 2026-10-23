@@ -132,3 +132,5 @@ v29 发布完成：源码 a1e618ffc5b368c6436ee9e6f71bf779ee5c1dde；push_event 
 
 ## 2026-10-23 v31 发布
 用户回复“提交”，本轮按发布处理，沿用仅更新 Cloudflare 的范围。排序当前值和目录选择/展开分离沿用 15 项定向检查结果，缓存升级至 v31。
+
+发布完成：源码 035e4ad6a95c6b60f77e2294572b21b0a7bf7ba6；Cloudflare 构建 e3d74217-10b3-45ff-9511-368de7a75361 outcome=success。正式站隔离浏览器 v30 会话刷新至 v31，缓存仅保留 v31；5 项排序/选择/展开收起线上检查通过，无页面异常。index.html/app.js/codec-worker.js/sw.js 经浏览器同源读取，换行归一化 SHA256 与本地构建全部一致。仅更新 CF，gh-pages 保持 a90da60c6c8520ddeafa227a879d39268c683850。示例文件位于隔离 OPFS，未访问用户目录。
