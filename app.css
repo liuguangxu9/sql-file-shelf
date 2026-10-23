@@ -75,11 +75,24 @@ shared UI lives in workbench.css. */ .wb .top-note {
   max-height:50vh;
   padding:8px 12px;
 }
+.wb .navigation .panelHead {
+  flex:0 0 auto;
+  height:auto;
+  min-height:48px;
+}
+.wb .navigation .panelTitle {
+  height:auto;
+  min-height:32px;
+}
+.wb .navigation .panelActions > * {
+  flex-shrink:0;
+}
 .wb .navigation .panelTitle>span:first-child {
   display:none;
 }
 .wb .navigation .panelActions {
   width:100%;
+  flex-wrap:wrap;
 }
 #fileCount {
   margin-left:auto;

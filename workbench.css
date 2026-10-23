@@ -171,6 +171,10 @@ body.wb {
   overflow:auto;
   min-height:0;
 }
+.wb .navigation > .scroll {
+  flex:1 1 0;
+  min-height:0;
+}
 .wb .navigationToggle {
   display:flex;
   align-items:center;
@@ -315,6 +319,7 @@ body.wb {
   display:flex;
   gap:4px;
   padding:12px 12px 8px;
+  flex-shrink:0;
 }
 .wb .wb-nav-views button {
   flex:1;
@@ -328,6 +333,8 @@ body.wb {
   font-weight:600;
 }
 .wb .wb-nav-search {
+  flex:0 0 32px;
+  min-height:32px;
   margin:0 12px 4px;
   width:calc(100% - 24px);
 }
@@ -497,7 +504,7 @@ body.wb {
   border-right:1px solid var(--line);
   border-top:2px solid transparent;
   max-width:260px;
-  cursor:grab;
+  cursor:default;
   user-select:none;
 }
 .wb .editorTab.dragging {
@@ -518,7 +525,7 @@ body.wb {
   white-space:nowrap;
 }
 .wb .editorTab>button:first-child {
-  cursor:grab;
+  cursor:default;
 }
 .wb .editorTab .closeTab {
   flex-shrink:0;
@@ -530,6 +537,9 @@ body.wb {
   padding:0 18px;
   color:#8b95a6;
   font-size:12px;
+}
+.wb .wb-tabs.wb-tab-dragging :is(.editorTab,button) {
+  cursor:grabbing;
 }
 .tabDropIndicator {
   position:fixed;
