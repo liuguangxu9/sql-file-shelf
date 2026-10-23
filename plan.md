@@ -169,3 +169,5 @@ v29 发布完成：源码 a1e618ffc5b368c6436ee9e6f71bf779ee5c1dde；push_event 
 
 ## 2026-10-23 v34 发布
 用户明确要求发布点击范围修复。仅更新 Cloudflare，名称按钮不再覆盖计数及空白；名称/箭头只展开收起，图标/计数/空白只选中。沿用本地真实鼠标检查，缓存升级至 v34。
+
+发布完成：源码 cbb6d6838c3d2d1e60779c933f4994812e765880；Cloudflare 构建 d02ceee6-4f70-415f-aa20-8d7f2ce33ae2 outcome=success。正式站隔离 v33 会话刷新至 v34，缓存仅保留 v34；真实 mouse move/down/up 检查名称展开/收起、箭头、图标、计数和右侧空白均通过，空白实际命中 treeNameCell，只选中而不切换展开。四个线上资源的换行归一化 SHA256 与本地构建一致，无页面异常。gh-pages 保持 a90da60c6c8520ddeafa227a879d39268c683850。仅使用隔离 OPFS 示例数据。
