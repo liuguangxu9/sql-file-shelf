@@ -413,12 +413,19 @@ function expandedFolders(workspaceId) {
   return state.expandedFolders.get(workspaceId);
 }
 
+function selectFolderPath(path) {
+  const workspace = current();
+  if (!workspace) return;
+  state.selectedFolders.set(workspace.id, path);
+  renderFiles();
+  workbench?.refresh();
+}
+
 function toggleFolderPath(path) {
   const workspace = current();
   if (!workspace) return;
   const expanded = expandedFolders(workspace.id);
   const wasOpen = Boolean($("fileSearch").value.trim()) || expanded.has(path);
-  state.selectedFolders.set(workspace.id, path);
   if (wasOpen) expanded.delete(path);
   else expanded.add(path);
   if ($("fileSearch").value) {
@@ -810,10 +817,11 @@ async function renderFiles() {
       }
       if (!counts.children.length) { counts.textContent = "空"; counts.title = "没有直属子目录或 SQL、TXT、MD 文件"; }
       pick.append(counts);
-      pick.title = `${isOpen ? "收起" : "展开"} ${node.path || workspace.name}，并选为新建位置`;
+      pick.title = `选中 ${node.path || workspace.name}，作为新建位置`;
+      pick.setAttribute("aria-pressed", String(node.path === selected?.path));
       pick.addEventListener("click", (event) => {
         event.stopPropagation();
-        toggleFolderPath(node.path);
+        selectFolderPath(node.path);
       });
       const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       icon.setAttribute("viewBox", "0 0 20 20");
@@ -822,7 +830,7 @@ async function renderFiles() {
       const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
       shape.setAttribute("d", "M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z");
       icon.append(shape);
-      row.addEventListener("click", () => toggleFolderPath(node.path));
+      row.addEventListener("click", () => selectFolderPath(node.path));
       content.append(arrow, icon, pick);
       const rename = document.createElement("button");
       rename.className = "fileAction folderRename";
@@ -896,7 +904,10 @@ async function renderFiles() {
 
 function updateSortMenu() {
   const labels = { modified: "修改时间", name: "文件名", extension: "格式" };
-  $("fileSortButton").title = `排序：${labels[state.fileSort.key]}${state.fileSort.direction === "asc" ? "升序" : "降序"}`;
+  const direction = state.fileSort.direction === "asc" ? "升序" : "降序";
+  $("fileSortButton").textContent = `${labels[state.fileSort.key]} ${state.fileSort.direction === "asc" ? "↑" : "↓"} ▾`;
+  $("fileSortButton").title = `排序：${labels[state.fileSort.key]}，${direction}`;
+  $("fileSortButton").setAttribute("aria-label", $("fileSortButton").title);
   $("fileSortDirection").textContent = state.fileSort.direction === "asc" ? "升序 ↑" : "降序 ↓";
   document.querySelectorAll("[data-sort-key]").forEach((button) => {
     const selected = button.dataset.sortKey === state.fileSort.key;
