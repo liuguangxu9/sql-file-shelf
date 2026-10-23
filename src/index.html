@@ -579,14 +579,14 @@
       :root { --files-width: 280px; --ink: #243047; --line: #e7ebf1; }
       body { font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
       .app { grid-template-rows: 56px 1fr 29px; }
-      .top { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:12px; padding:0 16px; background:#f9fafc; }
-      .topStart { display:flex; align-items:center; gap:8px; min-width:0; }
+      .top { display:grid; grid-template-columns:auto minmax(0,1fr) minmax(60px,330px); gap:12px; padding:0 16px; background:#f9fafc; }
+      .topStart { display:flex; align-items:center; gap:8px; min-width:0; padding-right:16px; border-right:1px solid var(--line); }
       .brand { display:flex; align-items:center; font-size:13px; font-weight:500; color:#788396; letter-spacing:.2px; }
       button { font-weight:500; border-radius:6px; }
       button:focus-visible, input:focus-visible { outline:2px solid #729cf2; outline-offset:2px; }
       button:disabled { opacity:.45; cursor:default; }
 
-      .workspaceSwitch { display:flex; align-items:center; justify-content:center; gap:8px; width:clamp(100px,25vw,240px); min-width:0; border-color:transparent; background:transparent; color:#35435a; font-size:14px; font-weight:600; }
+      .workspaceSwitch { display:flex; align-items:center; justify-content:flex-start; justify-self:start; gap:8px; width:fit-content; max-width:240px; min-width:0; border-color:transparent; background:transparent; color:#35435a; font-size:14px; font-weight:600; }
       .workspaceSwitch:hover,.workspaceSwitch[aria-expanded="true"] { background:#edf0f5; border-color:transparent; }
       #workspaceName { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .workspaceChevron { flex-shrink:0; width:12px; height:12px; fill:none; stroke:#8a95a6; stroke-width:1.5; }
@@ -631,7 +631,12 @@
       .fileRow:hover .fileRowActions,.fileRow:focus-within .fileRowActions { opacity:1; }
       .fileMeta { font-size:10px; color:#8b96a6; }
       #editorTabs { display:flex; flex-shrink:0; overflow-x:auto; min-height:40px; background:#f4f6fa; border-bottom:1px solid var(--line); }
-      .editorTab { display:flex; flex-shrink:0; align-items:center; border-right:1px solid var(--line); border-top:2px solid transparent; max-width:260px; }
+      .editorTab { display:flex; flex-shrink:0; align-items:center; border-right:1px solid var(--line); border-top:2px solid transparent; max-width:260px; cursor:grab; user-select:none; }
+      .editorTab.dragging { opacity:.4; background:#e8effc; }
+      .editorTab > button:first-child { cursor:grab; }
+      .tabDropIndicator { position:fixed; width:3px; z-index:30; background:#276ef1; border-radius:2px; pointer-events:none; box-shadow:0 0 0 2px #fff; }
+      .tabDropIndicator::before,.tabDropIndicator::after { content:""; position:absolute; left:-2px; width:7px; height:5px; border-radius:2px; background:#276ef1; }
+      .tabDropIndicator::before { top:0; }.tabDropIndicator::after { bottom:0; }
       .editorTab.selected { border-top-color:#3c72dc; background:#fff; }
       .editorTab button { border:0; background:transparent; height:36px; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .editorTab .closeTab { flex-shrink:0; padding:0 9px; color:#8b95a6; }
@@ -686,8 +691,8 @@
       @container (max-width:700px) { .meta { display:none; } .saveControls { flex-wrap:wrap; } }
       @media(max-width:900px) { .layout { grid-template-columns:240px 5px minmax(0,1fr); } .top { gap:7px; } .brand { font-size:13px; } .workspaceSwitch { max-width:150px; } }
       @media(max-width:650px) { .layout { grid-template-columns:minmax(0,1fr); } .navigation,.layout > .resizer { display:none; } .layout.navigationHidden { grid-template-columns:minmax(0,1fr); } .layout:not(.navigationHidden) .navigation { display:flex; } .layout:not(.navigationHidden) .editorPanel { display:none; } .quickOpen kbd { display:none; } .brand { font-size:12px; } .quickOpen { min-width:60px; } .workspaceSwitch { max-width:110px; } .top { padding:0 8px; } .shortcutHints { gap:10px; } #workspaceLocation { display:none; } .findRow { flex-wrap:wrap; } }
-      @media(max-width:650px) { .topStart { gap:4px; } .workspaceSwitch { max-width:none; } .quickOpen { font-size:11px; padding:0 5px; } }
-      @media(max-width:400px) { .brand { max-width:64px; overflow:hidden; text-overflow:ellipsis; } .top { gap:4px; } }
+      @media(max-width:650px) { .top { grid-template-columns:auto minmax(0,1fr) auto; } .topStart { gap:4px; padding-right:8px; } .workspaceSwitch { max-width:100%; padding:0 6px; font-size:13px; gap:5px; } .quickOpen { width:100px; font-size:11px; padding:0 5px; } }
+      @media(max-width:400px) { .brand { max-width:64px; overflow:hidden; text-overflow:ellipsis; } .top { gap:4px; } .quickOpen { width:68px; } }
       .navigation .panelTitle > span:first-child { display:none; }
       .navigation .panelActions { width:100%; align-items:center; gap:5px; }
       .navigation .panelActions button { white-space:nowrap; padding:0 6px; font-size:11px; }
@@ -814,6 +819,6 @@
     <dialog id="workspaceDialog" class="workspaceDialog"><header class="dialogHeader"><strong>管理工作区</strong><button id="closeWorkspaces" aria-label="关闭工作区管理">×</button></header><div id="workspaceActions"></div></dialog>
     <dialog id="searchDialog" class="searchDialog"><header class="dialogHeader"><strong id="searchTitle">快速打开文件</strong><button id="closeSearch" aria-label="关闭搜索">×</button></header><div id="searchInputHost"></div><p id="searchCount"></p><div id="searchResultsHost"></div></dialog>
     <div id="navViews"><button data-view="files" class="active">文件</button><button data-view="recent">最近</button><button data-view="favorites">收藏</button></div><div id="collectionList" class="scroll" hidden></div>
-    <script src="./app.js?v=27"></script>
+    <script src="./app.js?v=28"></script>
   </body>
 </html>

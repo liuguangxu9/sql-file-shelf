@@ -12,6 +12,7 @@ module.exports = function setupWorkbench(api) {
   let recent = [], favorites = [], view = 'files';
   let tabSignature = '', indexSignature = '', fileIndex = [], searchLoading = false;
   let dragging = null;
+  const tabRows = new Map();
   const editor = $('editor');
   const node = (tag, text, cls) => {
     const element = document.createElement(tag);
@@ -26,6 +27,67 @@ module.exports = function setupWorkbench(api) {
     return item;
   };
   const activeTab = () => tabs.find(tab => tab.file === state.active);
+  const tabBar = $('editorTabs');
+  const dropIndicator = node('div', undefined, 'tabDropIndicator');
+  dropIndicator.hidden = true;
+  dropIndicator.setAttribute('aria-hidden', 'true');
+  document.body.append(dropIndicator);
+  let dropIndex = null, dragX = 0, scrollFrame = 0;
+  function clearTabDrop() {
+    dropIndex = null;
+    dropIndicator.hidden = true;
+    cancelAnimationFrame(scrollFrame); scrollFrame = 0;
+  }
+  function finishTabDrag() {
+    clearTabDrop();
+    tabRows.get(dragging)?.classList.remove('dragging');
+    dragging = null;
+  }
+  function showTabDrop(clientX) {
+    const remaining = tabs.filter(tab => tab !== dragging);
+    const before = remaining.findIndex(tab => {
+      const rect = tabRows.get(tab).getBoundingClientRect();
+      return clientX < rect.left + rect.width / 2;
+    });
+    dropIndex = before < 0 ? remaining.length : before;
+    const bounds = tabBar.getBoundingClientRect();
+    const target = tabRows.get(remaining[dropIndex] || remaining[remaining.length - 1]);
+    const rect = target?.getBoundingClientRect();
+    const left = rect ? (dropIndex < remaining.length ? rect.left : rect.right) : bounds.left;
+    dropIndicator.style.left = `${Math.max(bounds.left + 2, Math.min(bounds.right - 3, left)) - 1}px`;
+    dropIndicator.style.top = `${bounds.top + 4}px`;
+    dropIndicator.style.height = `${bounds.height - 8}px`;
+    dropIndicator.hidden = false;
+  }
+  function scrollTabDrag() {
+    scrollFrame = 0;
+    if (!dragging || dropIndex === null) return;
+    const rect = tabBar.getBoundingClientRect();
+    const step = dragX < rect.left + 36 ? -10 : dragX > rect.right - 36 ? 10 : 0;
+    if (step) { tabBar.scrollLeft += step; showTabDrop(dragX); }
+    scrollFrame = requestAnimationFrame(scrollTabDrag);
+  }
+  tabBar.addEventListener('dragover', event => {
+    if (!dragging) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+    dragX = event.clientX; showTabDrop(dragX);
+    if (!scrollFrame) scrollFrame = requestAnimationFrame(scrollTabDrag);
+  });
+  tabBar.addEventListener('dragleave', event => {
+    if (!tabBar.contains(event.relatedTarget)) clearTabDrop();
+  });
+  tabBar.addEventListener('drop', event => {
+    if (!dragging) return;
+    event.preventDefault();
+    showTabDrop(event.clientX);
+    const moving = dragging, index = dropIndex;
+    finishTabDrag();
+    tabs.splice(tabs.indexOf(moving), 1);
+    tabs.splice(index, 0, moving);
+    renderTabs();
+    setStatus(`已移动标签：${moving.file.name}（第 ${index + 1} / ${tabs.length} 个）`);
+  });
+  window.addEventListener('resize', clearTabDrop);
   function capture() {
     const tab = activeTab();
     if (!tab) return;
@@ -49,30 +111,43 @@ module.exports = function setupWorkbench(api) {
     const signature = JSON.stringify(tabs.map(tab => [tab.file.workspaceId, state.workspaces.find(w=>w.id===tab.file.workspaceId)?.name, tab.file.path, tab.dirty, tab.file === state.active]));
     if (signature === tabSignature) return;
     tabSignature = signature;
-    const fragment = document.createDocumentFragment();
+    for (const [tab, row] of tabRows) {
+      if (!tabs.includes(tab)) { row.remove(); tabRows.delete(tab); }
+    }
+    tabBar.querySelector('.tabsPlaceholder')?.remove();
     for (const tab of tabs) {
-      const row = node('div', undefined, 'editorTab');
+      let row = tabRows.get(tab);
+      if (!row) {
+        row = node('div', undefined, 'editorTab');
+        const pick = button('', () => activate(tab));
+        const close = button('×', () => closeTab(tab));
+        close.className = 'closeTab';
+        row.draggable = true;
+        row.addEventListener('dblclick', event => {
+          if (event.target.closest('.closeTab')) return;
+          event.preventDefault(); closeTab(tab);
+        });
+        row.addEventListener('dragstart', event => {
+          dragging = tab;
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', keyOf(tab.file));
+          requestAnimationFrame(() => { if (dragging === tab) row.classList.add('dragging'); });
+        });
+        row.addEventListener('dragend', finishTabDrag);
+        row.append(pick, close);
+        tabRows.set(tab, row);
+      }
       row.classList.toggle('selected', tab.file === state.active);
       row.setAttribute('role', 'tab');
       row.setAttribute('aria-selected', String(tab.file === state.active));
-      const pick = button(`${tab.dirty ? '● ' : ''}${tab.file.name}`, () => activate(tab));
-      pick.title = `${state.workspaces.find(w => w.id === tab.file.workspaceId)?.name || ''} / ${tab.file.path}${tab.dirty ? ' · 未保存' : ''}`;
-      const close = button('×', () => closeTab(tab), `关闭 ${tab.file.name}`);
-      close.className = 'closeTab';
-      row.draggable = true;
-      row.addEventListener('dragstart', () => { dragging = tab; });
-      row.addEventListener('dragover', event => event.preventDefault());
-      row.addEventListener('drop', event => {
-        event.preventDefault();
-        if (!dragging || dragging === tab) return;
-        tabs.splice(tabs.indexOf(dragging), 1);
-        tabs.splice(tabs.indexOf(tab), 0, dragging);
-        dragging = null; renderTabs();
-      });
-      row.append(pick, close); fragment.append(row);
+      const [pick, close] = row.children;
+      pick.textContent = `${tab.dirty ? '● ' : ''}${tab.file.name}`;
+      pick.title = `${state.workspaces.find(w => w.id === tab.file.workspaceId)?.name || ''} / ${tab.file.path}${tab.dirty ? ' · 未保存' : ''} · 双击关闭，拖动排序`;
+      close.title = `关闭 ${tab.file.name}`;
+      const index = tabs.indexOf(tab);
+      if (tabBar.children[index] !== row) tabBar.insertBefore(row, tabBar.children[index] || null);
     }
-    if (!tabs.length) fragment.append(node('span', '工作台', 'tabsPlaceholder'));
-    $('editorTabs').replaceChildren(fragment);
+    if (!tabs.length) tabBar.append(node('span', '工作台', 'tabsPlaceholder'));
   }
   function activate(tab) {
     if (tab.file === state.active) return;
@@ -106,6 +181,7 @@ module.exports = function setupWorkbench(api) {
     put('recentFiles', recent); renderCollection();
   }
   function closeTab(tab) {
+    if (!tabs.includes(tab)) return;
     capture();
     if (tab.dirty && !confirm(`“${tab.file.name}”尚未保存。关闭并放弃修改吗？`)) return;
     const index = tabs.indexOf(tab);
@@ -281,7 +357,7 @@ module.exports = function setupWorkbench(api) {
     if (!workspaceMenu.matches(':popover-open')) return;
     const rect = $('manageWorkspaces').getBoundingClientRect();
     const width = workspaceMenu.getBoundingClientRect().width;
-    workspaceMenu.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, (rect.left + rect.right - width) / 2))}px`;
+    workspaceMenu.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, rect.left))}px`;
     workspaceMenu.style.top = `${rect.bottom + 8}px`;
   }
   function renderWorkspaceMenu() {
