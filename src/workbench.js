@@ -1,4 +1,4 @@
-const search = require('./search-model');
+const UI = require("../vendor/workbench/workbench");
 const { cursorPosition } = require('./editor-window');
 const { isWithin, renamedPath } = require('./folder-operations');
 const keyOf = (file) => JSON.stringify([file.workspaceId, file.path]);
@@ -10,84 +10,21 @@ module.exports = function setupWorkbench(api) {
   const tabs = [];
   const closed = [];
   let recent = [], favorites = [], view = 'files';
-  let tabSignature = '', indexSignature = '', fileIndex = [], searchLoading = false;
-  let dragging = null;
-  const tabRows = new Map();
+  let indexSignature = '', searchLoading = false;
   const editor = $('editor');
-  const node = (tag, text, cls) => {
-    const element = document.createElement(tag);
-    if (text !== undefined) element.textContent = text;
-    if (cls) element.className = cls;
-    return element;
-  };
-  const button = (text, action, title = text) => {
-    const item = node('button', text);
-    item.type = 'button'; item.title = title;
-    item.addEventListener('click', action);
-    return item;
-  };
+  const { node, button } = UI;
   const activeTab = () => tabs.find(tab => tab.file === state.active);
-  const tabBar = $('editorTabs');
-  const dropIndicator = node('div', undefined, 'tabDropIndicator');
-  dropIndicator.hidden = true;
-  dropIndicator.setAttribute('aria-hidden', 'true');
-  document.body.append(dropIndicator);
-  let dropIndex = null, dragX = 0, scrollFrame = 0;
-  function clearTabDrop() {
-    dropIndex = null;
-    dropIndicator.hidden = true;
-    cancelAnimationFrame(scrollFrame); scrollFrame = 0;
-  }
-  function finishTabDrag() {
-    clearTabDrop();
-    tabRows.get(dragging)?.classList.remove('dragging');
-    dragging = null;
-  }
-  function showTabDrop(clientX) {
-    const remaining = tabs.filter(tab => tab !== dragging);
-    const before = remaining.findIndex(tab => {
-      const rect = tabRows.get(tab).getBoundingClientRect();
-      return clientX < rect.left + rect.width / 2;
-    });
-    dropIndex = before < 0 ? remaining.length : before;
-    const bounds = tabBar.getBoundingClientRect();
-    const target = tabRows.get(remaining[dropIndex] || remaining[remaining.length - 1]);
-    const rect = target?.getBoundingClientRect();
-    const left = rect ? (dropIndex < remaining.length ? rect.left : rect.right) : bounds.left;
-    dropIndicator.style.left = `${Math.max(bounds.left + 2, Math.min(bounds.right - 3, left)) - 1}px`;
-    dropIndicator.style.top = `${bounds.top + 4}px`;
-    dropIndicator.style.height = `${bounds.height - 8}px`;
-    dropIndicator.hidden = false;
-  }
-  function scrollTabDrag() {
-    scrollFrame = 0;
-    if (!dragging || dropIndex === null) return;
-    const rect = tabBar.getBoundingClientRect();
-    const step = dragX < rect.left + 36 ? -10 : dragX > rect.right - 36 ? 10 : 0;
-    if (step) { tabBar.scrollLeft += step; showTabDrop(dragX); }
-    scrollFrame = requestAnimationFrame(scrollTabDrag);
-  }
-  tabBar.addEventListener('dragover', event => {
-    if (!dragging) return;
-    event.preventDefault(); event.dataTransfer.dropEffect = 'move';
-    dragX = event.clientX; showTabDrop(dragX);
-    if (!scrollFrame) scrollFrame = requestAnimationFrame(scrollTabDrag);
+  const tabView = UI.createTabs({
+    host: $('editorTabs'),
+    onSelect(key) { const tab = tabs.find(item => keyOf(item.file) === key); if (tab) activate(tab); },
+    onClose(key) { const tab = tabs.find(item => keyOf(item.file) === key); if (tab) closeTab(tab); },
+    onReorder(key, index) {
+      const from = tabs.findIndex(item => keyOf(item.file) === key);
+      if (from < 0) return;
+      const [moving] = tabs.splice(from, 1); tabs.splice(index, 0, moving); renderTabs();
+      setStatus(`已移动标签：${moving.file.name}（第 ${index + 1} / ${tabs.length} 个）`);
+    },
   });
-  tabBar.addEventListener('dragleave', event => {
-    if (!tabBar.contains(event.relatedTarget)) clearTabDrop();
-  });
-  tabBar.addEventListener('drop', event => {
-    if (!dragging) return;
-    event.preventDefault();
-    showTabDrop(event.clientX);
-    const moving = dragging, index = dropIndex;
-    finishTabDrag();
-    tabs.splice(tabs.indexOf(moving), 1);
-    tabs.splice(index, 0, moving);
-    renderTabs();
-    setStatus(`已移动标签：${moving.file.name}（第 ${index + 1} / ${tabs.length} 个）`);
-  });
-  window.addEventListener('resize', clearTabDrop);
   function capture() {
     const tab = activeTab();
     if (!tab) return;
@@ -123,46 +60,10 @@ module.exports = function setupWorkbench(api) {
     cursorStatus();
   }
   function renderTabs() {
-    const signature = JSON.stringify(tabs.map(tab => [tab.file.workspaceId, state.workspaces.find(w=>w.id===tab.file.workspaceId)?.name, tab.file.path, tab.dirty, tab.file === state.active]));
-    if (signature === tabSignature) return;
-    tabSignature = signature;
-    for (const [tab, row] of tabRows) {
-      if (!tabs.includes(tab)) { row.remove(); tabRows.delete(tab); }
-    }
-    tabBar.querySelector('.tabsPlaceholder')?.remove();
-    for (const tab of tabs) {
-      let row = tabRows.get(tab);
-      if (!row) {
-        row = node('div', undefined, 'editorTab');
-        const pick = button('', () => activate(tab));
-        const close = button('×', () => closeTab(tab));
-        close.className = 'closeTab';
-        row.draggable = true;
-        row.addEventListener('dblclick', event => {
-          if (event.target.closest('.closeTab')) return;
-          event.preventDefault(); closeTab(tab);
-        });
-        row.addEventListener('dragstart', event => {
-          dragging = tab;
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData('text/plain', keyOf(tab.file));
-          requestAnimationFrame(() => { if (dragging === tab) row.classList.add('dragging'); });
-        });
-        row.addEventListener('dragend', finishTabDrag);
-        row.append(pick, close);
-        tabRows.set(tab, row);
-      }
-      row.classList.toggle('selected', tab.file === state.active);
-      row.setAttribute('role', 'tab');
-      row.setAttribute('aria-selected', String(tab.file === state.active));
-      const [pick, close] = row.children;
-      pick.textContent = `${tab.dirty ? '● ' : ''}${tab.file.name}`;
-      pick.title = `${state.workspaces.find(w => w.id === tab.file.workspaceId)?.name || ''} / ${tab.file.path}${tab.dirty ? ' · 未保存' : ''} · 双击关闭，拖动排序`;
-      close.title = `关闭 ${tab.file.name}`;
-      const index = tabs.indexOf(tab);
-      if (tabBar.children[index] !== row) tabBar.insertBefore(row, tabBar.children[index] || null);
-    }
-    if (!tabs.length) tabBar.append(node('span', '工作台', 'tabsPlaceholder'));
+    tabView.update(tabs.map(tab => ({
+      key: keyOf(tab.file), label: tab.file.name, dirty: tab.dirty, selected: tab.file === state.active,
+      title: `${state.workspaces.find(w => w.id === tab.file.workspaceId)?.name || ''} / ${tab.file.path}${tab.dirty ? ' · 未保存' : ''} · 双击关闭，拖动排序`,
+    })));
   }
   function activate(tab) {
     if (tab.file === state.active && state.activeWorkspaceId === tab.file.workspaceId) {
@@ -279,30 +180,30 @@ module.exports = function setupWorkbench(api) {
     clearSecondaryCursors();
     editor.value = text; editor.setSelectionRange(start, end);
     editor.dispatchEvent(new Event('input', { bubbles: true }));
-    editor.focus(); updateFindCount();
+    editor.focus();
   }
-  function findMatches() { return search.matches(editor.value, $('findInput').value, $('matchCase').checked); }
-  function updateFindCount() {
-    const count = findMatches().length;
-    $('findCount').textContent = $('findInput').value ? `${count} 处匹配` : '输入查找内容';
-  }
-  function findNext(back = false) {
-    const found = findMatches(); updateFindCount();
-    if (!found.length) return;
-    const match = back ? [...found].reverse().find(m => m.start < editor.selectionStart) || found.at(-1)
-      : found.find(m => m.start >= editor.selectionEnd && (m.end !== editor.selectionEnd || editor.selectionStart === editor.selectionEnd)) || found[0];
-    jump(match.start, match.end);
-  }
+  const findView = UI.createFindReplace({
+    editor, bar: $('findBar'), input: $('findInput'), replacement: $('replaceInput'),
+    caseToggle: $('matchCase'), count: $('findCount'), replaceRow: $('replaceRow'),
+    buttons: { previous: $('previousMatch'), next: $('nextMatch'), one: $('replaceOne'), all: $('replaceAll'), close: $('closeFind') },
+    onEdit: editText, onJump: jump, onFeedback: setStatus,
+  });
   function showFind(replace = false) {
     if (!state.active) return setStatus('请先打开文件。');
-    $('findBar').hidden = false;
-    $('replaceRow').hidden = !replace;
-    const selection = editor.value.slice(editor.selectionStart, editor.selectionEnd);
-    if (selection && !selection.includes('\n')) $('findInput').value = selection;
-    $('findInput').focus(); $('findInput').select(); updateFindCount();
+    findView.show(replace);
   }
+  const quickSearch = UI.createQuickOpen({
+    dialog: $('searchDialog'), input: $('globalSearch'), results: $('globalResults'), count: $('searchCount'),
+    async onSelect(result) {
+      const { workspace, entry } = result.record;
+      if (await openFile(workspace.id, entry)) {
+        const changed = state.activeWorkspaceId !== workspace.id; state.activeWorkspaceId = workspace.id;
+        if (changed) { await put('activeWorkspaceId', workspace.id); await api.render(); }
+      }
+    },
+  });
   function showSearch() {
-    $('searchDialog').showModal(); $('globalSearch').focus();
+    quickSearch.show();
     runSearch();
     if (searchLoading) return;
     const missing = state.workspaces.filter(workspace => !state.fileCache.has(workspace.id));
@@ -318,71 +219,30 @@ module.exports = function setupWorkbench(api) {
     });
   }
   function runSearch() {
-    const query = $('globalSearch').value.trim().toLocaleLowerCase();
-    const target = $('globalResults'); target.replaceChildren();
-    const label = $('searchCount');
-    if (!query) {
-      label.textContent = searchLoading ? '正在读取其他已授权工作区…' : '按文件名或路径查找 · Enter 打开 · Esc 关闭';
-      return;
-    }
     const signature = `${state.fileIndexVersion}:${state.workspaces.map(w=>w.id).join(',')}`;
     if (signature !== indexSignature) {
       indexSignature = signature;
-      fileIndex = state.workspaces.flatMap(workspace => (state.fileCache.get(workspace.id) || [])
-        .map(entry => ({ workspace, entry, term:`${entry.name} ${entry.path}`.toLocaleLowerCase() })));
+      quickSearch.setItems(state.workspaces.flatMap(workspace => (state.fileCache.get(workspace.id) || [])
+        .map(entry => ({ key: keyOf({ workspaceId: workspace.id, path: entry.path }), label: entry.name,
+          description: `${workspace.name} / ${entry.path}`, term: `${entry.name} ${entry.path}`, record: { workspace, entry } }))));
     }
-    let total = 0;
-    const fragment = document.createDocumentFragment();
-    for (const result of fileIndex) {
-      if (!result.term.includes(query)) continue;
-      total++;
-      if (total > 100) continue;
-      const { workspace, entry } = result;
-      const item = button('', async () => {
-        $('searchDialog').close();
-        if (await openFile(workspace.id, entry)) {
-          const changed = state.activeWorkspaceId !== workspace.id;
-          state.activeWorkspaceId = workspace.id;
-          if (changed) { await put('activeWorkspaceId', workspace.id); await api.render(); }
-        }
-      });
-      item.className = 'result';
-      item.append(node('strong', entry.name), node('small', `${workspace.name} / ${entry.path}`));
-      fragment.append(item);
-    }
-    target.replaceChildren(fragment);
     const unread = state.workspaces.filter(w=>!state.fileCache.has(w.id)).length;
-    label.textContent = `${total > 100 ? `共 ${total} 项，显示前 100 项` : `${total} 项结果`}${searchLoading ? ' · 正在读取其他目录…' : unread ? ` · ${unread} 个工作区未授权，请恢复访问` : ''}`;
-    if (!total) target.append(node('div', '没有匹配文件，试试文件名或目录名。', 'placeholder'));
+    quickSearch.search({ idleMessage: searchLoading ? '正在读取其他已授权工作区…' : '按文件名或路径查找 · Enter 打开 · Esc 关闭',
+      suffix: searchLoading ? ' · 正在读取其他目录…' : unread ? ` · ${unread} 个工作区未授权，请恢复访问` : '' });
   }
 
-  // Move the existing workspace controls to a compact manager; keep all permission actions intact.
   const layout = document.querySelector('.layout');
-  const panels = layout.querySelectorAll(':scope > .panel');
-  const workspacePanel = panels[0], filePanel = panels[1];
-  filePanel.classList.add('navigation');
-  filePanel.id = 'directoryNavigation';
+  const filePanel = $('directoryNavigation');
   const manager = $('workspaceDialog');
-  manager.append(workspacePanel);
-  $('workspaceActions').append($('addWorkspace'));
-  $('searchInputHost').append($('globalSearch'));
-  $('searchResultsHost').append($('globalResults'));
-  workspacePanel.querySelector('.panelHead').style.height = '42px';
-  workspacePanel.querySelector('.panelHead').style.flexBasis = '42px';
-  const resizers = layout.querySelectorAll('.resizer');
-  resizers[0]?.remove();
-  filePanel.prepend($('navViews'));
-  $('navViews').after($('fileSearch'));
-  filePanel.append($('collectionList'));
-  document.querySelector('.top-note').hidden = true;
+  const shell = UI.createShell({
+    root: document.querySelector('.app'), layout, navigation: filePanel,
+    content: document.querySelector('.editorPanel'), toggle: $('toggleNavigation'), splitter: $('navigationSplitter'),
+    onChange(value) {
+      Promise.all([put('layout', { files: `${value.width}px` }), put('navigationHidden', value.hidden)])
+        .catch(error => setStatus(`布局设置未保存：${error.message}`, true));
+    },
+  });
   const workspaceMenu = $('workspaceMenu');
-  function positionWorkspaceMenu() {
-    if (!workspaceMenu.matches(':popover-open')) return;
-    const rect = $('manageWorkspaces').getBoundingClientRect();
-    const width = workspaceMenu.getBoundingClientRect().width;
-    workspaceMenu.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, rect.left))}px`;
-    workspaceMenu.style.top = `${rect.bottom + 8}px`;
-  }
   function renderWorkspaceMenu() {
     const list = $('workspaceMenuList');
     list.replaceChildren();
@@ -400,50 +260,13 @@ module.exports = function setupWorkbench(api) {
     }
     if (!state.workspaces.length) list.append(node('div', '还没有工作区，添加一个本地目录。', 'workspaceMenuEmpty'));
   }
-  workspaceMenu.addEventListener('beforetoggle', event => {
-    $('manageWorkspaces').setAttribute('aria-expanded', String(event.newState === 'open'));
-    if (event.newState === 'open') renderWorkspaceMenu();
-  });
-  workspaceMenu.addEventListener('toggle', event => {
-    if (event.newState === 'open') {
-      positionWorkspaceMenu();
-      (workspaceMenu.querySelector('[aria-checked="true"]') || workspaceMenu.querySelector('button'))?.focus();
-    }
-  });
-  $('manageWorkspaces').addEventListener('keydown', event => {
-    if (event.key === 'ArrowDown') { event.preventDefault(); workspaceMenu.showPopover(); }
-  });
-  workspaceMenu.addEventListener('keydown', event => {
-    const items = [...workspaceMenu.querySelectorAll('button')];
-    const index = items.indexOf(document.activeElement);
-    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-      event.preventDefault();
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-      items[next]?.focus();
-    }
-    if (event.key === 'Escape') $('manageWorkspaces').focus();
-  });
-  window.addEventListener('resize', positionWorkspaceMenu);
+  const workspacePopover = UI.createPopover({ trigger: $('manageWorkspaces'), menu: workspaceMenu, onOpen: renderWorkspaceMenu });
   $('menuAddWorkspace').onclick = () => { workspaceMenu.hidePopover(); $('addWorkspace').click(); };
   $('menuManageWorkspaces').onclick = () => { workspaceMenu.hidePopover(); manager.showModal(); };
   $('closeWorkspaces').onclick = () => manager.close();
   $('closeSearch').onclick = () => $('searchDialog').close();
-  $('searchDialog').addEventListener('close', () => { clearTimeout(state.globalTimer); });
   $('quickOpen').onclick = showSearch;
   $('emptyQuickOpen').onclick = showSearch;
-  function syncNavigation() {
-    const hidden = layout.classList.contains('navigationHidden');
-    const toggle = $('toggleNavigation');
-    toggle.title = hidden ? '显示左侧目录栏（Ctrl+B）' : '隐藏左侧目录栏（Ctrl+B）';
-    toggle.setAttribute('aria-label', toggle.title);
-    toggle.setAttribute('aria-expanded', String(!hidden));
-    toggle.classList.toggle('collapsed', hidden);
-  }
-  $('toggleNavigation').onclick = () => {
-    layout.classList.toggle('navigationHidden');
-    syncNavigation();
-    put('navigationHidden', layout.classList.contains('navigationHidden'));
-  };
   $('favoriteFile').onclick = () => {
     if (!state.active) return;
     const key = keyOf(state.active);
@@ -455,39 +278,11 @@ module.exports = function setupWorkbench(api) {
   $('fileSearch').addEventListener('input', renderCollection);
   $('findFile').onclick = () => showFind();
   $('replaceFile').onclick = () => showFind(true);
-  $('closeFind').onclick = () => { $('findBar').hidden = true; editor.focus(); };
-  $('findInput').addEventListener('input', updateFindCount);
-  $('matchCase').addEventListener('change', updateFindCount);
-  $('nextMatch').onclick = () => findNext();
-  $('previousMatch').onclick = () => findNext(true);
-  $('findInput').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); findNext(event.shiftKey); } });
-  $('replaceOne').onclick = () => {
-    const hit = findMatches().find(m => m.start === editor.selectionStart && m.end === editor.selectionEnd);
-    if (!hit) return findNext();
-    const replacement = $('replaceInput').value;
-    editText(editor.value.slice(0, hit.start) + replacement + editor.value.slice(hit.end), hit.start, hit.start + replacement.length);
-    findNext();
-  };
-  $('replaceAll').onclick = () => {
-    const result = search.replaceAll(editor.value, $('findInput').value, $('replaceInput').value, $('matchCase').checked);
-    if (result.count) editText(result.text, 0, 0);
-    setStatus(`已替换 ${result.count} 处，可按 Ctrl+Z 撤销。`);
-  };
-  $('globalSearch').addEventListener('keydown', event => {
-    if (event.key === 'Enter') { event.preventDefault(); $('globalResults').querySelector('button')?.click(); }
-    if (event.key === 'ArrowDown') { event.preventDefault(); $('globalResults').querySelector('button')?.focus(); }
-  });
-  $('globalResults').addEventListener('keydown', event => {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      (event.key === 'ArrowDown' ? event.target.nextElementSibling : event.target.previousElementSibling)?.focus();
-    }
-  });
-  editor.addEventListener('input', () => { cursorStatus(); if (!$('findBar').hidden) updateFindCount(); });
+  editor.addEventListener('input', cursorStatus);
   editor.addEventListener('keyup', cursorStatus); editor.addEventListener('click', cursorStatus);
   window.addEventListener('keydown', event => {
     if (state.busy) return;
-    if (event.key === 'Escape' && !$('findBar').hidden) { $('findBar').hidden = true; editor.focus(); }
+    if (event.key === 'Escape' && !$('findBar').hidden) { findView.close(); }
     if (!(event.ctrlKey || event.metaKey)) return;
     const key = event.key.toLowerCase();
     if (key === 'p') { event.preventDefault(); if (!$('searchDialog').open) showSearch(); }
@@ -499,13 +294,14 @@ module.exports = function setupWorkbench(api) {
       activate(tabs[(tabs.indexOf(activeTab()) + (event.shiftKey ? tabs.length - 1 : 1)) % tabs.length]);
     }
   });
-  const ready = Promise.all([get('recentFiles'), get('favoriteFiles'), get('navigationHidden')]).then(([r, f, hidden]) => {
+  const ready = Promise.all([get('recentFiles'), get('favoriteFiles'), get('navigationHidden'), get('layout')]).then(([r, f, hidden, saved]) => {
     recent = Array.isArray(r) ? r : []; favorites = Array.isArray(f) ? f : [];
-    layout.classList.toggle('navigationHidden', hidden === undefined ? matchMedia('(max-width:650px)').matches : Boolean(hidden)); syncNavigation(); renderCollection(); sync();
+    shell.restore({ width: saved?.files, hidden }); renderCollection(); sync();
   });
   return {
     ready, capture, sync, opened, runSearch,
-    cancelSearch() { $('globalResults').replaceChildren(); },
+    destroy() { tabView.destroy(); workspacePopover.destroy(); shell.destroy(); findView.destroy(); quickSearch.destroy(); },
+    cancelSearch() { quickSearch.clear(); },
     has(workspaceId, path) { return tabs.some(t => t.file.workspaceId === workspaceId && t.file.path === path); },
     restore(workspaceId, path) {
       const tab = tabs.find(t => t.file.workspaceId === workspaceId && t.file.path === path);

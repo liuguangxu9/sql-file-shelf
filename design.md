@@ -1,3 +1,21 @@
+# 当前架构：Tool Workbench 1.0.0（2026-10-23）
+
+用户批准从 SQL 文件架提炼可复用框架，再按框架重写本程序，要求“内聚，高效”。本次为本地 v36，尚未发布线上。
+
+- 公共实现唯一维护于 `../tool-workbench/src/`；本项目使用 `vendor/workbench/` 的版本化 SHA-256 快照。构建核验快照与离线资源清单，CI 不需要外部源码目录。
+- index.html 直接声明两区工作台、工作区对话框、搜索对话框和顶层菜单，启动不再把旧三栏节点搬来搬去。
+- Shell 管布局、拖宽和折叠；Tree 管键控行节点、独立选中/展开、键盘和动作；Tabs 管稳定节点、焦点及拖动插入线；Popover 管顶层定位和键盘；QuickOpen 管内存索引筛选、去抖与结果交互；FindReplace 管查找替换；EditorSurface 管可视行、装饰和帧调度。
+- app.js 维护文件系统授权、编码与保存；workbench.js 接入工作区、草稿、最近/收藏和搜索索引。组件只收描述记录及回调，不访问应用全局 state。
+- 源码中的 editor-indent、multi-cursor、search-model 与 editor-window 是兼容入口，实际通用实现来自框架。SQL 高亮、编码检测、备份与冲突仍归应用。
+- 目录授权失败时打开管理面板提供恢复入口。保存沿用原编码/BOM/换行与字节校验，保持现有业务保证。
+- 公共样式在框架，应用样式只处理业务差异；外框四角圆角、常驻路径/状态栏、窄屏导航与内容切换。
+
+升级框架：在框架包运行 `node scripts/export.cjs ../sql-file-shelf/vendor/workbench`，重新测试和构建。不要直接修改 vendor。验收见 README 的 v36 段及框架 validation.md。
+
+以下为历次设计记录，若与上述当前架构冲突，以当前架构和源码为准。
+
+---
+
 # SQL 文件架设计
 
 ## 信息架构

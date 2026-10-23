@@ -80,3 +80,14 @@ GitHub Pages 采用 `gh-pages` 发布分支：`main` 保存源码，`gh-pages` �
 ## v25 界面精简（2026-10-23）
 
 左上角目录切换仅保留图标，动作提示保留在悬停提示与无障碍名称；右上角说明徽标移除。包含上述 v24 本地修订。用户授权直接发布，范围沿用 Cloudflare，GitHub Pages 不更新。
+
+
+## v36 本地框架重写（2026-10-23，未发布）
+
+本程序改用 Tool Workbench 1.0.0。工作台外壳、树、标签、菜单、快速打开、查找替换、可视行编辑层和公共样式由独立框架提供。文件授权、编码、备份、冲突处理和 SQL 高亮继续由应用负责。详见 design.md 的当前架构。
+
+框架源包：`../tool-workbench/`；本项目自带 `vendor/workbench/` 固定快照，独立构建，不依赖源包相对位置。构建会核验 SHA-256 及页面/Worker 资源是否全部纳入离线缓存。更新快照后运行 `npm test`、`npm run build` 和受影响浏览器回归。
+
+本次保留全部已有文件业务。附加修正：授权失败时打开恢复面板；后台编码 Worker 的资源版本与离线缓存一致。框架 4 项与应用 54 项规则测试通过；浏览器回归、性能及旧会话升级的详细证据见 `../tool-workbench/validation.md`。
+
+新增浏览器检查：`tests/browser-framework-layout.js` 在桌面和 390px 窄屏执行；`tests/browser-offline.js` 在独立测试源、已激活 v36 且离线刷新后执行。脚本仅写 OPFS 演示数据，不访问用户目录。fixture 明确恢复测试布局，使测试不受上次窄屏状态影响。

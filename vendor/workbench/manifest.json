@@ -1,0 +1,11 @@
+{
+  "name": "@liugx/tool-workbench",
+  "version": "1.0.0",
+  "files": {
+    "editor-indent.js": "e38d043cc9c44b0e27645639983a09ca4c9913665c49378ff472f1fc28add494",
+    "multi-cursor.js": "3fe0bf4cc48948a16c1db058192f51ee04cfb11028c349a7c7d7dcdde221b0b6",
+    "search-model.js": "835a6cbb623e0f9381a70e8aff1e1526c929a83231dfc2d8926ca3cc40ce055a",
+    "workbench.css": "7c0bdf9cf56e4f775c8eccd827098ef7218542acce7d11dedbd8dbe21ea338b9",
+    "workbench.js": "745b8f219f03698765dc84200009b4da910ca55de3bc65f309bdeb1774fd689b"
+  }
+}

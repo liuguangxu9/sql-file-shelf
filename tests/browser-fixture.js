@@ -15,11 +15,13 @@
   }
   const database=await new Promise((resolve,reject)=>{
     const request=indexedDB.open('sql-file-shelf',1);
+    request.onupgradeneeded=()=>request.result.createObjectStore('settings');
     request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
   });
   await new Promise((resolve,reject)=>{
     const tx=database.transaction('settings','readwrite');const store=tx.objectStore('settings');
     store.put([{id:'demo',name:directory.name,handle:directory},{id:'second',name:other.name,handle:other}],'workspaces');
+    store.put(false,'navigationHidden');store.put({files:'280px'},'layout');
     store.put('demo','activeWorkspaceId');store.put([],'favoriteFiles');store.put([],'recentFiles');
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
   });

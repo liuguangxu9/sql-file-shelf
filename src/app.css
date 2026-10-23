@@ -1,0 +1,237 @@
+/* SQL file shelf application features;
+shared UI lives in workbench.css. */ .wb .top-note {
+  display:none;
+}
+.wb .workspaceDialog {
+  width:min(460px,90vw);
+}
+.wb .workspaceManager>.panelHead {
+  height:42px;
+  flex-basis:42px;
+}
+.wb .workspaceList {
+  padding:8px;
+  max-height:50vh;
+}
+.wb .workspace {
+  display:flex;
+  gap:4px;
+  margin:2px 0;
+  transition:transform .18s,background .18s;
+}
+.wb .workspace.drag-over {
+  transform:translateY(3px);
+  background:var(--blue-soft);
+  border-radius:7px;
+}
+.wb .workspace button:first-child {
+  flex:1;
+  text-align:left;
+  border:0;
+  padding:0 8px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:14px;
+}
+.wb .workspace button.active {
+  background:var(--blue-soft);
+  color:#1450bd;
+}
+.wb .workspace .remove {
+  width:28px;
+  height:28px;
+  border:0;
+  color:#9aa5b5;
+  padding:0;
+  font-size:18px;
+}
+.wb .grant {
+  margin:2px 8px 8px;
+  color:#1759c9;
+  border-color:#c9dbff;
+  font-size:12px;
+}
+#workspaceActions {
+  padding:0 20px 8px;
+}
+.wb .searchDialog {
+  width:min(760px,90vw);
+  margin-top:12vh;
+}
+#searchInputHost {
+  padding:6px 20px;
+}
+#globalSearch {
+  height:42px;
+  background:#f8fafe;
+}
+#searchCount {
+  color:#8b95a6;
+  font-size:11px;
+  padding:0 20px;
+}
+#globalResults {
+  max-height:50vh;
+  padding:8px 12px;
+}
+.wb .navigation .panelTitle>span:first-child {
+  display:none;
+}
+.wb .navigation .panelActions {
+  width:100%;
+}
+#fileCount {
+  margin-left:auto;
+  font-size:10px;
+  white-space:nowrap;
+  color:#8b95a6;
+}
+.wb .collectionItem {
+  display:block;
+  text-align:left;
+  border:0;
+  background:transparent;
+  width:100%;
+  height:auto;
+  padding:12px 16px;
+}
+.wb .collectionItem:hover {
+  background:#eaf0fa;
+}
+.wb .collectionItem strong,.wb .collectionItem small {
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.wb .collectionItem strong {
+  font-size:13px;
+  font-weight:500;
+}
+.wb .collectionItem small {
+  color:#8793a5;
+  margin-top:5px;
+  font-size:10px;
+}
+.wb .meta {
+  display:flex;
+  min-width:0;
+  overflow:hidden;
+  gap:7px;
+  color:var(--muted);
+  font-size:10px;
+  white-space:nowrap;
+}
+.wb .meta b {
+  color:var(--ink);
+  font-weight:550;
+}
+.wb .encodingControl {
+  flex-shrink:0;
+}
+#encodingButton {
+  min-width:92px;
+  font-size:12px;
+}
+.wb.sortMenu {
+  width:164px;
+}
+.wb.sortMenu button {
+  display:block;
+  width:100%;
+  border:0;
+  padding:7px 9px;
+  text-align:left;
+}
+.wb.sortMenu button:hover,.wb.sortMenu button.selected {
+  background:var(--blue-soft);
+}
+.wb .sortMenuDivider {
+  display:block;
+  height:1px;
+  margin:5px 0;
+  background:var(--line);
+}
+.wb .sql-keyword {
+  color:#7655d5;
+  font-weight:700;
+}
+.wb .sql-string {
+  color:#b05b17;
+}
+.wb .sql-comment {
+  color:#7e8a9a;
+  font-style:italic;
+}
+.wb .sql-number {
+  color:#0d7d75;
+}
+#findBar {
+  padding:10px 16px;
+  background:#f7f9fc;
+  border-bottom:1px solid var(--line);
+  flex-shrink:0;
+}
+#findCount {
+  font-size:11px;
+  color:#8793a5;
+  white-space:nowrap;
+}
+dialog.wb.fileDialog {
+  width:min(430px,calc(100vw - 32px));
+  padding:22px;
+}
+.wb .fileDialog h2 {
+  margin:0 0 16px;
+  font-size:15px;
+}
+.wb.fileDialog label {
+  display:block;
+  margin:12px 0;
+  color:#53627a;
+}
+.wb.fileDialog input,.wb.fileDialog select {
+  display:block;
+  width:100%;
+  margin-top:5px;
+  padding:9px;
+}
+dialog.wb.conflictDialog {
+  width:min(980px,calc(100vw - 32px));
+}
+.wb .conflictCompare {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+.wb .conflictCompare section {
+  min-width:0;
+}
+.wb .conflictCompare pre {
+  height:min(45vh,360px);
+  overflow:auto;
+  padding:12px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--soft);
+  white-space:pre;
+}
+@container(max-width:700px) {
+  .wb .meta {
+    display:none;
+  }
+  .wb .saveControls {
+    flex-wrap:wrap;
+  }
+  .wb .editorHead {
+    height:auto;
+    min-height:76px;
+    flex-basis:auto;
+  }
+}
+@media(max-width:650px) {
+  .wb .conflictCompare {
+    grid-template-columns:1fr;
+  }
+}

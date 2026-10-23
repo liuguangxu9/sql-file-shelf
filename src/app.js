@@ -1,3 +1,4 @@
+const UI = require("../vendor/workbench/workbench");
 const setupWorkbench = require("./workbench");
 let workbench = null;
 const codec = require("./codec");
@@ -8,8 +9,8 @@ const operations = require("./file-operations");
 const { renameDirectory, renamedPath, isWithin } = require("./folder-operations");
 const { editIndent } = require("./editor-indent");
 const { applyMultiEdit } = require("./multi-cursor");
-const { escapeHtml, highlightSql } = require("./highlight");
-const { editorWindow } = require("./editor-window");
+const { highlightSql } = require("./highlight");
+
 const ACCEPTED = new Set(["sql", "txt", "md"]);
 const MAX_HIGHLIGHT_CHARS = 180000;
 const state = {
@@ -23,13 +24,10 @@ const state = {
   expandedFolders: new Map(),
   active: null,
   dirty: false,
-  globalTimer: null,
   fileSort: { key: "modified", direction: "desc" },
   draggingWorkspaceId: null,
   workspaceRenderVersion: 0,
   fileSearchTimer: null,
-  editorDecorationTimer: null,
-  editorWindowCache: null,
   fileOpenVersion: 0,
   secondaryCursors: [],
   altDrag: null,
@@ -228,6 +226,7 @@ async function selectWorkspace(id) {
   if (!workspace) return false;
   const granted = await permission(workspace.handle);
   if (granted) $("workspaceDialog").close();
+  else if (!$("workspaceDialog").open) $("workspaceDialog").showModal();
   workbench?.capture();
   state.activeWorkspaceId = id;
   state.selectedFolders.set(id, "");
@@ -363,10 +362,8 @@ async function openFile(workspaceId, entry, force = false) {
 }
 
 function updateFileSelection(path = state.active?.path, workspaceId = state.active?.workspaceId) {
-  for (const row of $("fileList").querySelectorAll(".fileRow")) {
-    row.classList.toggle("active", workspaceId === state.activeWorkspaceId &&
-      row.dataset.path === path);
-  }
+  fileTree.setSelected(item => item.kind === "folder" ? item.selected :
+    workspaceId === state.activeWorkspaceId && item.path === path);
 }
 
 async function newFile() {
@@ -509,7 +506,7 @@ async function deleteFolder(folder) {
 function chooseFolderName(folder) {
   return new Promise(resolve => {
     const dialog = document.createElement("dialog");
-    dialog.className = "fileDialog";
+    dialog.className = "wb fileDialog";
     const heading = document.createElement("h2"); heading.textContent = "重命名目录";
     const location = document.createElement("p"); location.textContent = folder.path;
     const input = document.createElement("input"); input.value = folder.handle.name;
@@ -581,7 +578,7 @@ async function renameFolder(folder) {
 function chooseFileLocation(entry, folders) {
   return new Promise((resolve) => {
     const dialog = document.createElement("dialog");
-    dialog.className = "fileDialog";
+    dialog.className = "wb fileDialog";
     const heading = document.createElement("h2");
     heading.textContent = "重命名或移动文件";
     const nameLabel = document.createElement("label");
@@ -729,9 +726,18 @@ async function renderWorkspaces() {
   list.replaceChildren(fragment);
 }
 
+const fileTree = UI.createTree({
+  host: $("fileList"),
+  onSelect(item) { if (item.kind === "folder") toggleFolderPath(item.path, true); else openFile(current().id, item.record.entry); },
+  onToggle(item) { toggleFolderPath(item.path); },
+  onAction(item, action) {
+    const record = item.kind === "folder" ? item.record.folder : item.record.entry;
+    if (action === "rename") return item.kind === "folder" ? renameFolder(record) : editFileLocation(record);
+    return item.kind === "folder" ? deleteFolder(record) : deleteFile(record);
+  },
+});
+
 async function renderFiles() {
-  const body = $("fileList");
-  const fragment = document.createDocumentFragment();
   const workspace = current();
   const all = workspace ? state.fileCache.get(workspace.id) || [] : [];
   const folders = workspace ? state.folderCache.get(workspace.id) || [] : [];
@@ -755,139 +761,25 @@ async function renderFiles() {
     ? "没有匹配的文件，可选中文件夹后新建。"
     : "选择一个已授权工作区后显示文件。";
   updateSortMenu();
-  for (const node of tree.rows) {
-    const row = document.createElement("div");
-    row.dataset.path = node.path;
-    if (node.kind === "folder") {
-      const searching = Boolean($("fileSearch").value.trim());
-      const isOpen = searching || expandedFolders(workspace.id).has(node.path);
-      row.className = `folderRow${isOpen ? " open" : ""}${node.path === selected?.path ? " selected" : ""}`;
-      row.title = node.path || workspace.name;
-      const content = document.createElement("div");
-      content.className = "treeNameCell";
-      content.style.paddingLeft = `${node.depth * 20}px`;
-      const arrow = document.createElement("button");
-      arrow.className = "treeToggle";
-      arrow.title = searching ? "搜索时自动展开匹配目录" : isOpen ? "收起文件夹" : "展开文件夹";
-      arrow.setAttribute("aria-label", `${arrow.title}：${node.path || workspace.name}`);
-      arrow.setAttribute("aria-expanded", String(isOpen));
-      const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      chevron.setAttribute("viewBox", "0 0 18 18");
-      chevron.setAttribute("aria-hidden", "true");
-      const chevronPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      chevronPath.setAttribute("d", "M6.5 4.5 11.5 9l-5 4.5");
-      chevron.append(chevronPath);
-      arrow.append(chevron);
-      arrow.addEventListener("click", (event) => {
-        event.stopPropagation();
-        toggleFolderPath(node.path);
-      });
-      const pick = document.createElement("button");
-      pick.className = "folderPick";
-      const name = document.createElement("span");
-      name.className = "folderName";
-      name.textContent = node.path ? node.path.split("/").pop() : workspace.name;
-      pick.append(name);
-      const counts = document.createElement("span");
-      counts.className = "folderCounts";
-      for (const [kind, label, shape] of [
-        ["folders", "个子目录", 'M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z'],
-        ["files", "个文件", 'M9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9.5 2ZM9 2v4h4'],
-      ]) {
-        if (!node.counts[kind]) continue;
-        const count = document.createElement("span");
-        count.className = "folderCount";
-        count.title = `${node.counts[kind]} ${label}（直属${kind === "files" ? " SQL、TXT、MD" : ""}）`;
-        count.setAttribute("aria-label", count.title);
-        const countIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        countIcon.setAttribute("viewBox", kind === "folders" ? "0 0 20 20" : "0 0 16 16");
-        countIcon.setAttribute("aria-hidden", "true");
-        const countPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        countPath.setAttribute("d", shape);
-        countIcon.append(countPath);
-        count.append(countIcon, String(node.counts[kind]));
-        counts.append(count);
-      }
-      if (!counts.children.length) { counts.textContent = "空"; counts.title = "没有直属子目录或 SQL、TXT、MD 文件"; }
-      pick.title = `选中并${isOpen ? "收起" : "展开"} ${node.path || workspace.name}`;
-      pick.setAttribute("aria-expanded", String(isOpen));
-      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      icon.setAttribute("viewBox", "0 0 20 20");
-      icon.setAttribute("aria-hidden", "true");
-      icon.classList.add("folderIcon");
-      const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      shape.setAttribute("d", "M2.5 5.5A1.5 1.5 0 0 1 4 4h3.5l1.7 2H16a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z");
-      icon.append(shape);
-      row.addEventListener("click", () => toggleFolderPath(node.path, true));
-      content.append(arrow, icon, pick, counts);
-      const rename = document.createElement("button");
-      rename.className = "fileAction folderRename";
-      rename.textContent = "⋯";
-      rename.title = `重命名目录 ${node.path}`;
-      rename.setAttribute("aria-label", rename.title);
-      rename.addEventListener("click", event => { event.stopPropagation(); renameFolder(node.folder); });
-      const actions = document.createElement("div");
-      actions.className = "folderActions";
-      const remove = document.createElement("button");
-      remove.className = "fileDelete folderDelete";
-      remove.disabled = !node.folder.empty;
-      remove.title = node.folder.empty ? `删除空目录 ${node.path}` : "只能删除空目录";
-      remove.setAttribute("aria-label", remove.title);
-      remove.textContent = "×";
-      remove.addEventListener("click", (event) => {
-        event.stopPropagation();
-        deleteFolder(node.folder);
-      });
-      actions.append(rename, remove);
-      content.append(actions);
-      row.append(content);
-      fragment.append(row);
-      continue;
-    }
-    const entry = node.entry;
-    row.className = `fileRow${node.depth ? " nested" : ""}${state.active?.handle === entry.handle ? " active" : ""}`;
-    row.style.setProperty("--tree-depth", node.depth);
-    row.title = entry.path;
-    row.addEventListener("click", () => openFile(workspace.id, entry));
-    const content = document.createElement("div");
-    content.className = "fileNameCell";
-    content.style.paddingLeft = `${node.depth * 20 + 22}px`;
-    const icon = document.createElement("span");
-    icon.className = "fileIcon";
-    icon.textContent = "▤";
-    const label = document.createElement("span");
-    label.className = "fileNameText";
-    label.textContent = entry.name;
-    const editLocation = document.createElement("button");
-    editLocation.className = "fileAction";
-    editLocation.title = `重命名或移动 ${entry.path}`;
-    editLocation.setAttribute("aria-label", editLocation.title);
-    editLocation.textContent = "⋯";
-    editLocation.addEventListener("click", (event) => {
-      event.stopPropagation();
-      editFileLocation(entry);
-    });
-    const remove = document.createElement("button");
-    remove.className = "fileDelete";
-    remove.title = `删除 ${entry.path}`;
-    remove.setAttribute("aria-label", remove.title);
-    remove.textContent = "×";
-    remove.addEventListener("click", (event) => {
-      event.stopPropagation();
-      deleteFile(entry);
-    });
-    content.append(icon, label);
-    const actions = document.createElement("div");
-    actions.className = "fileRowActions";
-    actions.append(editLocation, remove);
-    const meta = document.createElement("div");
-    meta.className = "fileMeta";
-    meta.style.paddingLeft = `${node.depth * 20 + 40}px`;
-    meta.textContent = `${files.formatFileTime(entry.modified)} · ${entry.extension.toUpperCase()}`;
-    row.append(content, meta, actions);
-    fragment.append(row);
-  }
-  body.replaceChildren(fragment);
+  fileTree.update(tree.rows.map(node => ({
+    key: node.kind + ":" + node.path, path: node.path, kind: node.kind, depth: node.depth,
+    label: node.kind === "folder" ? (node.path.split("/").pop() || workspace.name) : node.entry.name,
+    title: node.path || workspace.name,
+    selected: node.kind === "folder" ? node.path === selected?.path : state.active?.handle === node.entry.handle,
+    expanded: node.kind === "folder" && (Boolean($("fileSearch").value.trim()) || expandedFolders(workspace.id).has(node.path)),
+    meta: node.kind === "file" ? `${files.formatFileTime(node.entry.modified)} · ${node.entry.extension.toUpperCase()}` : undefined,
+    badges: node.kind === "folder" ? [
+      ...(node.counts.folders ? [{ text: String(node.counts.folders), icon: "folder", title: `${node.counts.folders} 个直属子目录` }] : []),
+      ...(node.counts.files ? [{ text: String(node.counts.files), icon: "file", title: `${node.counts.files} 个直属 SQL、TXT、MD 文件` }] : []),
+      ...(!node.counts.folders && !node.counts.files ? [{ text: "空", title: "没有直属子目录或 SQL、TXT、MD 文件" }] : []),
+    ] : [],
+    actions: [
+      { id: "rename", label: "⋯", title: node.kind === "folder" ? `重命名目录 ${node.path}` : `重命名或移动 ${node.path}` },
+      { id: "delete", label: "×", title: node.kind === "folder" ? `删除空目录 ${node.path}` : `删除 ${node.path}`, danger: true, disabled: node.kind === "folder" && !node.folder.empty },
+    ],
+    record: node,
+  })));
+
 }
 
 function updateSortMenu() {
@@ -902,10 +794,6 @@ function updateSortMenu() {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
-}
-
-async function renderGlobalSearch() {
-  return workbench?.runSearch();
 }
 
 function saveBytes() {
@@ -953,7 +841,7 @@ async function writeTo(handle, parent, { backup, expectedBytes, name, path, payl
 function showConflict(diskBytes) {
   return new Promise((resolve) => {
     const dialog = document.createElement("dialog");
-    dialog.className = "fileDialog conflictDialog";
+    dialog.className = "wb fileDialog conflictDialog";
     const heading = document.createElement("h2");
     heading.textContent = "磁盘文件已有新修改";
     const description = document.createElement("p");
@@ -1080,49 +968,9 @@ function changeEncoding() {
   updateEditorInfo();
 }
 
-function renderEditorDecorations() {
-  cancelAnimationFrame(state.editorDecorationTimer);
-  state.editorDecorationTimer = null;
-  const editor = $("editor");
-  const text = editor.value;
-  const shell = editor.parentElement;
-  if (text.length > MAX_HIGHLIGHT_CHARS) {
-    shell.classList.add("plainEditor");
-    $("lineNumberContent").textContent = "";
-    $("highlightCode").textContent = "";
-    state.editorWindowCache = null;
-    return;
-  }
-  shell.classList.remove("plainEditor");
-  renderEditorWindow(true);
-}
-function renderEditorWindow(force = false) {
-  const editor = $("editor");
-  if (editor.parentElement.classList.contains("plainEditor")) return;
-  const text = editor.value;
-  let cache = state.editorWindowCache;
-  if (!cache || cache.text !== text) {
-    cache = state.editorWindowCache = { text, starts: editorLines(text) };
-  }
-  const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
-  const view = editorWindow(cache.starts, text.length, editor.scrollTop, editor.clientHeight, lineHeight);
-  const code = $("highlightCode");
-  const numbers = $("lineNumberContent");
-  if (force || cache.first !== view.first || cache.last !== view.last) {
-    code.innerHTML = state.active?.extension === "sql"
-      ? highlightSql(text, view) : escapeHtml(text.slice(view.start, view.end));
-    numbers.textContent = Array.from({ length: view.last - view.first }, (_, i) => view.first + i + 1).join("\n");
-    cache.first = view.first;
-    cache.last = view.last;
-  }
-  const y = view.first * lineHeight - editor.scrollTop;
-  code.style.transform = `translate(${-editor.scrollLeft}px, ${y}px)`;
-  numbers.style.transform = `translateY(${y}px)`;
-}
-function scheduleEditorDecorations() {
-  if (state.editorDecorationTimer !== null) return;
-  state.editorDecorationTimer = requestAnimationFrame(renderEditorDecorations);
-}
+let editorSurface;
+function renderEditorDecorations() { editorSurface.refresh(); }
+function scheduleEditorDecorations() { editorSurface.schedule(); }
 
 function clearSecondaryCursors() {
   state.altDrag = null;
@@ -1317,81 +1165,21 @@ function moveCursor(value, position, key) {
   return position;
 }
 function setupEditorChrome() {
-  const editor = $("editor");
-  const shell = document.createElement("div");
-  shell.className = "editorShell";
-  const lines = document.createElement("pre");
-  lines.id = "lineNumbers";
-  lines.className = "lineNumbers";
-  const numberContent = document.createElement("div");
-  numberContent.id = "lineNumberContent";
-  lines.append(numberContent);
-  const highlight = document.createElement("pre");
-  highlight.id = "highlight";
-  highlight.className = "highlight";
-  const code = document.createElement("code");
-  code.id = "highlightCode";
-  highlight.append(code);
-  const cursors = document.createElement("div");
-  cursors.id = "secondaryCursors";
-  cursors.className = "secondaryCursors";
-  editor.parentElement.insertBefore(shell, editor);
-  shell.append(lines, highlight, editor, cursors);
-  editor.addEventListener("scroll", () => {
-    renderEditorWindow();
-    renderSecondaryCursors();
+  editorSurface = UI.createEditorSurface({
+    editor: $("editor"), maxDecoratedChars: MAX_HIGHLIGHT_CHARS, getLines: editorLines,
+    ids: { lines: "lineNumbers", numbers: "lineNumberContent", highlight: "highlight", code: "highlightCode", cursors: "secondaryCursors" },
+    onScroll: renderSecondaryCursors,
+    decorate(text, view) {
+      const fragment = document.createDocumentFragment();
+      if (state.active?.extension === "sql") {
+        // highlightSql escapes every source fragment; HTML is generated only by this trusted renderer.
+        const template = document.createElement("template");
+        template.innerHTML = highlightSql(text, view);
+        fragment.append(template.content);
+      } else fragment.append(document.createTextNode(text.slice(view.start, view.end)));
+      return fragment;
+    },
   });
-  new ResizeObserver(() => {
-    renderEditorWindow();
-    renderSecondaryCursors();
-  }).observe(editor);
-  renderEditorDecorations();
-}
-function setupResizers() {
-  const layout = document.querySelector(".layout");
-  const firstPanel = layout.children[0];
-  const secondPanel = layout.children[1];
-  const left = document.createElement("div");
-  const middle = document.createElement("div");
-  left.className = middle.className = "resizer";
-  left.setAttribute("aria-label", "调整工作区宽度");
-  middle.setAttribute("aria-label", "调整文件列表宽度");
-  layout.insertBefore(left, secondPanel);
-  layout.insertBefore(middle, secondPanel.nextSibling);
-  const bind = (bar, variable, minimum) =>
-    bar.addEventListener("pointerdown", (event) => {
-      const start = event.clientX;
-      const initial = parseInt(
-        getComputedStyle(document.documentElement).getPropertyValue(variable),
-        10,
-      );
-      bar.classList.add("dragging");
-      bar.setPointerCapture(event.pointerId);
-      const move = (next) => {
-        const value = Math.max(
-          minimum,
-          Math.min(initial + next.clientX - start, window.innerWidth - 430),
-        );
-        document.documentElement.style.setProperty(variable, `${value}px`);
-      };
-      const end = async () => {
-        bar.classList.remove("dragging");
-        bar.removeEventListener("pointermove", move);
-        bar.removeEventListener("pointerup", end);
-        await put("layout", {
-          workspace: getComputedStyle(document.documentElement)
-            .getPropertyValue("--workspace-width")
-            .trim(),
-          files: getComputedStyle(document.documentElement)
-            .getPropertyValue("--files-width")
-            .trim(),
-        });
-      };
-      bar.addEventListener("pointermove", move);
-      bar.addEventListener("pointerup", end);
-    });
-  bind(left, "--workspace-width", 180);
-  bind(middle, "--files-width", 260);
 }
 
 async function render() {
@@ -1401,19 +1189,10 @@ async function render() {
 }
 async function init() {
   setupEditorChrome();
-  setupResizers();
   workbench = setupWorkbench({ state, $, get, put, openFile, renderFiles, render,
     updateEditorInfo, setFileIdentity, renderEditorDecorations, updateFileSelection,
     clearEditor, clearSecondaryCursors, setStatus, scanWorkspace, permission, editorLines, requestAccess });
   await workbench.ready;
-  const layout = await get("layout");
-  if (layout?.workspace)
-    document.documentElement.style.setProperty(
-      "--workspace-width",
-      layout.workspace,
-    );
-  if (layout?.files)
-    document.documentElement.style.setProperty("--files-width", layout.files);
   state.workspaces = store.normalizeWorkspaces(await get("workspaces"));
   if (!state.workspaces.length) {
     const legacy = await get("workspace");
@@ -1438,16 +1217,11 @@ async function init() {
       : "准备就绪。",
   );
 }
-$("fileSortButton").addEventListener("click", (event) => {
-  event.stopPropagation();
-  const menu = $("fileSortMenu");
-  menu.hidden = !menu.hidden;
-  $("fileSortButton").setAttribute("aria-expanded", String(!menu.hidden));
-});
+const sortPopover = UI.createPopover({ trigger: $("fileSortButton"), menu: $("fileSortMenu"), onOpen: updateSortMenu });
 document.querySelectorAll("[data-sort-key]").forEach((button) =>
   button.addEventListener("click", () => {
     state.fileSort.key = button.dataset.sortKey;
-    $("fileSortMenu").hidden = true;
+    sortPopover.close();
     $("fileSortButton").setAttribute("aria-expanded", "false");
     renderFiles();
   }),
@@ -1456,12 +1230,6 @@ $("fileSortDirection").addEventListener("click", () => {
   state.fileSort.direction = state.fileSort.direction === "asc" ? "desc" : "asc";
   renderFiles();
 });
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".sortControl")) {
-    $("fileSortMenu").hidden = true;
-    $("fileSortButton").setAttribute("aria-expanded", "false");
-  }
-});
 $("addWorkspace").addEventListener("click", addWorkspace);
 $("refreshFiles").addEventListener("click", refreshCurrentWorkspace);
 $("newFile").addEventListener("click", newFile);
@@ -1469,11 +1237,6 @@ $("newFolder").addEventListener("click", newFolder);
 $("fileSearch").addEventListener("input", () => {
   clearTimeout(state.fileSearchTimer);
   state.fileSearchTimer = setTimeout(renderFiles, 120);
-});
-$("globalSearch").addEventListener("input", () => {
-  workbench?.cancelSearch();
-  clearTimeout(state.globalTimer);
-  state.globalTimer = setTimeout(renderGlobalSearch, 250);
 });
 $("editor").addEventListener("input", () => {
   state.fileOpenVersion += 1;
@@ -1617,7 +1380,7 @@ $("editor").addEventListener("keydown", (event) => {
   editor.dispatchEvent(new Event("input", { bubbles: true }));
 });
 function closeEncodingMenu(restoreFocus = false) {
-  $("encodingMenu").hidden = true;
+  $("encodingMenu").hidePopover();
   $("encodingButton").setAttribute("aria-expanded", "false");
   if (restoreFocus) $("encodingButton").focus();
 }
@@ -1648,29 +1411,7 @@ for (const option of $("encodingSelect").options) {
   });
   $("encodingMenu").append(button);
 }
-$("encodingButton").addEventListener("click", () => {
-  if (!$("encodingMenu").hidden) return closeEncodingMenu();
-  updateEncodingMenu();
-  $("encodingMenu").hidden = false;
-  $("encodingButton").setAttribute("aria-expanded", "true");
-  $("encodingMenu").querySelector(".selected")?.focus();
-});
-$("encodingButton").parentElement.addEventListener("keydown", event => {
-  if (event.key === "Escape") {
-    event.preventDefault(); event.stopPropagation(); closeEncodingMenu(true);
-  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-    event.preventDefault(); event.stopPropagation();
-    if ($("encodingButton").disabled) return;
-    if ($("encodingMenu").hidden) { $("encodingButton").click(); return; }
-    const options = [...$("encodingMenu").children];
-    const index = options.indexOf(document.activeElement);
-    options[event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
-      : (index + (event.key === "ArrowUp" ? -1 : 1) + options.length) % options.length].focus();
-  } else if (event.key === "Tab") closeEncodingMenu();
-});
-document.addEventListener("click", event => {
-  if (!event.target.closest(".encodingControl")) closeEncodingMenu();
-});
+const encodingPopover = UI.createPopover({ trigger: $("encodingButton"), menu: $("encodingMenu"), onOpen: updateEncodingMenu });
 $("encodingSelect").addEventListener("change", changeEncoding);
 $("save").addEventListener("click", () => runWrite(save));
 $("saveAs").addEventListener("click", () => runWrite(saveAs));
