@@ -751,8 +751,6 @@ async function renderFiles() {
         hideRoot: true,
       })
     : { rows: [], count: 0 };
-  $("selectRoot").disabled = !workspace || !folders.length;
-  $("selectRoot").setAttribute("aria-pressed", String(Boolean(workspace) && !selected?.path));
   $("newFile").disabled = !workspace || !folders.length;
   $("newFolder").disabled = !workspace || !folders.length;
   const target = selected?.path || workspace?.name || "当前目录";
@@ -1236,7 +1234,8 @@ $("fileSortDirection").addEventListener("click", () => {
 $("addWorkspace").addEventListener("click", addWorkspace);
 $("refreshFiles").addEventListener("click", refreshCurrentWorkspace);
 $("newFile").addEventListener("click", newFile);
-$("selectRoot").addEventListener("click", () => {
+$("fileList").parentElement.addEventListener("click", (event) => {
+  if (event.composedPath().some((node) => node.getAttribute?.("role") === "treeitem")) return;
   const workspace = current();
   if (!workspace) return;
   state.selectedFolders.set(workspace.id, "");

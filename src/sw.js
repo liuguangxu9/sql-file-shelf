@@ -1,5 +1,5 @@
-const CACHE = 'sql-file-shelf-v40';
-const ASSETS = ['./', './index.html', './workbench.css?v=40', './app.css?v=40', './app.js?v=40', './codec-worker.js?v=40', './favicon.png?v=2', './manifest.webmanifest'];
+const CACHE = 'sql-file-shelf-v41';
+const ASSETS = ['./', './index.html', './workbench.css?v=41', './app.css?v=41', './app.js?v=41', './codec-worker.js?v=41', './favicon.png?v=2', './manifest.webmanifest'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (event) => {
