@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest">
     <title>SQL 文件架</title>
 
-  <link rel="stylesheet" href="./workbench.css?v=39"><link rel="stylesheet" href="./app.css?v=39"></head>
+  <link rel="stylesheet" href="./workbench.css?v=40"><link rel="stylesheet" href="./app.css?v=40"></head>
   <body class="wb">
     <main class="app wb wb-shell">
       <header class="top">
@@ -27,7 +27,7 @@
               <span>文件</span><span class="panelActions"><span class="sortControl">
                   <button id="fileSortButton" title="排序" aria-expanded="false" aria-controls="fileSortMenu">排序 ▾</button>
 
-                </span><button id="refreshFiles" title="刷新当前工作区文件">
+                </span><button id="selectRoot" title="选择工作区根目录作为新建位置">根目录</button><button id="refreshFiles" title="刷新当前工作区文件">
                   刷新</button><button id="newFolder" title="在所选目录下新建子目录">新目录</button><button id="newFile" class="primary" title="在所选目录下新建文件">
                   新建</button><span id="fileCount">0 个</span></span>
             </div>
@@ -102,5 +102,5 @@
                     <button data-sort-key="extension" role="menuitem">格式</button>
                     <span class="sortMenuDivider"></span>
                     <button id="fileSortDirection" role="menuitem">降序 ↓</button>
-                  </span><span id="encodingMenu" class="sortMenu wb wb-popover" role="menu" aria-label="保存编码" popover="auto"></span><script src="./app.js?v=39"></script></body>
+                  </span><span id="encodingMenu" class="sortMenu wb wb-popover" role="menu" aria-label="保存编码" popover="auto"></span><script src="./app.js?v=40"></script></body>
 </html>
