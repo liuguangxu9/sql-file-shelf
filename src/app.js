@@ -389,6 +389,7 @@ async function newFile() {
     const entry = (state.fileCache.get(workspace.id) || []).find(
       (item) => item.path === joinedPath(folder.path, result.name),
     );
+    await renderFiles();
     if (entry) await openFile(workspace.id, entry);
     setStatus(existing ? `已打开 ${result.name}。` : `已新建 ${result.name}。`);
   } catch (error) {
@@ -750,6 +751,8 @@ async function renderFiles() {
         hideRoot: true,
       })
     : { rows: [], count: 0 };
+  $("selectRoot").disabled = !workspace || !folders.length;
+  $("selectRoot").setAttribute("aria-pressed", String(Boolean(workspace) && !selected?.path));
   $("newFile").disabled = !workspace || !folders.length;
   $("newFolder").disabled = !workspace || !folders.length;
   const target = selected?.path || workspace?.name || "当前目录";
@@ -765,7 +768,7 @@ async function renderFiles() {
     key: node.kind + ":" + node.path, path: node.path, kind: node.kind, depth: node.depth,
     label: node.kind === "folder" ? (node.path.split("/").pop() || workspace.name) : node.entry.name,
     title: node.path || workspace.name,
-    selected: node.kind === "folder" ? node.path === selected?.path : state.active?.handle === node.entry.handle,
+    selected: node.kind === "folder" ? node.path === selected?.path : state.active?.workspaceId === workspace.id && state.active?.path === node.path,
     expanded: node.kind === "folder" && (Boolean($("fileSearch").value.trim()) || expandedFolders(workspace.id).has(node.path)),
     meta: node.kind === "file" ? `${files.formatFileTime(node.entry.modified)} · ${node.entry.extension.toUpperCase()}` : undefined,
     badges: node.kind === "folder" ? [
@@ -1233,6 +1236,14 @@ $("fileSortDirection").addEventListener("click", () => {
 $("addWorkspace").addEventListener("click", addWorkspace);
 $("refreshFiles").addEventListener("click", refreshCurrentWorkspace);
 $("newFile").addEventListener("click", newFile);
+$("selectRoot").addEventListener("click", () => {
+  const workspace = current();
+  if (!workspace) return;
+  state.selectedFolders.set(workspace.id, "");
+  renderFiles();
+  workbench?.refresh();
+  setStatus("已选择工作区根目录作为新建位置。");
+});
 $("newFolder").addEventListener("click", newFolder);
 $("fileSearch").addEventListener("input", () => {
   clearTimeout(state.fileSearchTimer);
