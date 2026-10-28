@@ -66,8 +66,10 @@ module.exports = function setupWorkbench(api) {
     })));
   }
   function activate(tab) {
+    state.treeFileSelected = true;
     if (tab.file === state.active && state.activeWorkspaceId === tab.file.workspaceId) {
       if (selectFileDirectory(tab.file)) renderFiles();
+      updateFileSelection();
       updateLocation();
       setStatus(`已打开 ${tab.file.name}。`);
       return;
@@ -95,8 +97,8 @@ module.exports = function setupWorkbench(api) {
     } else if (directoryChanged) renderFiles();
     setStatus(`已打开 ${tab.file.name}。`);
   }
-  function opened() {
-    if (selectFileDirectory(state.active)) renderFiles();
+  function opened(selectDirectory = true) {
+    if (selectDirectory && selectFileDirectory(state.active)) renderFiles();
     let tab = activeTab();
     if (!tab) { tab = { file: state.active }; tabs.push(tab); }
     capture(); sync();

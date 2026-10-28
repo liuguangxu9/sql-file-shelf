@@ -9,7 +9,7 @@ function decodeAsync(bytes) {
     return Promise.resolve({ metadata, text, newline: codec.detectNewline(text) });
   }
   if (!worker) {
-    worker = new Worker("./codec-worker.js?v=41");
+    worker = new Worker("./codec-worker.js?v=42");
     worker.onmessage = ({ data }) => {
       const task = pending.get(data.id);
       if (!task) return;
