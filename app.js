@@ -8526,6 +8526,8 @@ const state = {
   scanning: new Map(),
   fileIndexVersion: 0,
   selectedFolders: new Map(),
+  treeFileSelected: false,
+  treeSelectionVersion: 0,
   expandedFolders: new Map(),
   active: null,
   dirty: false,
@@ -8825,6 +8827,8 @@ async function removeWorkspace(id) {
 
 async function openFile(workspaceId, entry, force = false) {
   let version;
+  state.treeFileSelected = true;
+  const selectionVersion = ++state.treeSelectionVersion;
   try {
     workbench?.capture();
     if (!force && workbench?.restore(workspaceId, entry.path)) return true;
@@ -8855,7 +8859,7 @@ async function openFile(workspaceId, entry, force = false) {
     markDirty(false);
     updateEditorInfo();
     updateFileSelection();
-    workbench?.opened();
+    workbench?.opened(selectionVersion === state.treeSelectionVersion);
     setStatus(`已打开 ${entry.name}。`);
     return true;
   } catch (error) {
@@ -8868,7 +8872,7 @@ async function openFile(workspaceId, entry, force = false) {
 
 function updateFileSelection(path = state.active?.path, workspaceId = state.active?.workspaceId) {
   fileTree.setSelected(item => item.kind === "folder" ? item.selected :
-    workspaceId === state.activeWorkspaceId && item.path === path);
+    state.treeFileSelected && workspaceId === state.activeWorkspaceId && item.path === path);
 }
 
 async function newFile() {
@@ -9271,7 +9275,7 @@ async function renderFiles() {
     key: node.kind + ":" + node.path, path: node.path, kind: node.kind, depth: node.depth,
     label: node.kind === "folder" ? (node.path.split("/").pop() || workspace.name) : node.entry.name,
     title: node.path || workspace.name,
-    selected: node.kind === "folder" ? node.path === selected?.path : state.active?.workspaceId === workspace.id && state.active?.path === node.path,
+    selected: node.kind === "folder" ? node.path === selected?.path : state.treeFileSelected && state.active?.workspaceId === workspace.id && state.active?.path === node.path,
     expanded: node.kind === "folder" && (Boolean($("fileSearch").value.trim()) || expandedFolders(workspace.id).has(node.path)),
     meta: node.kind === "file" ? `${files.formatFileTime(node.entry.modified)} · ${node.entry.extension.toUpperCase()}` : undefined,
     badges: node.kind === "folder" ? [
@@ -9338,7 +9342,7 @@ async function writeTo(handle, parent, { backup, expectedBytes, name, path, payl
   state.editorHistory.current = editorSnapshot();
   setFileIdentity(name, `${owner.name} / ${path}`);
   markDirty(false);
-  workbench?.opened();
+  workbench?.opened(false);
   await scanWorkspace(owner);
   await renderFiles();
   renderEditorDecorations();
@@ -9744,6 +9748,8 @@ $("fileList").parentElement.addEventListener("click", (event) => {
   const workspace = current();
   if (!workspace) return;
   state.selectedFolders.set(workspace.id, "");
+  state.treeFileSelected = false;
+  state.treeSelectionVersion++;
   renderFiles();
   workbench?.refresh();
   setStatus("已选择工作区根目录作为新建位置。");
@@ -9958,7 +9964,7 @@ function decodeAsync(bytes) {
     return Promise.resolve({ metadata, text, newline: codec.detectNewline(text) });
   }
   if (!worker) {
-    worker = new Worker("./codec-worker.js?v=41");
+    worker = new Worker("./codec-worker.js?v=42");
     worker.onmessage = ({ data }) => {
       const task = pending.get(data.id);
       if (!task) return;
@@ -10510,8 +10516,10 @@ module.exports = function setupWorkbench(api) {
     })));
   }
   function activate(tab) {
+    state.treeFileSelected = true;
     if (tab.file === state.active && state.activeWorkspaceId === tab.file.workspaceId) {
       if (selectFileDirectory(tab.file)) renderFiles();
+      updateFileSelection();
       updateLocation();
       setStatus(`已打开 ${tab.file.name}。`);
       return;
@@ -10539,8 +10547,8 @@ module.exports = function setupWorkbench(api) {
     } else if (directoryChanged) renderFiles();
     setStatus(`已打开 ${tab.file.name}。`);
   }
-  function opened() {
-    if (selectFileDirectory(state.active)) renderFiles();
+  function opened(selectDirectory = true) {
+    if (selectDirectory && selectFileDirectory(state.active)) renderFiles();
     let tab = activeTab();
     if (!tab) { tab = { file: state.active }; tabs.push(tab); }
     capture(); sync();
